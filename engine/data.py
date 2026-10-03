@@ -9,7 +9,8 @@ CSV = Path(__file__).resolve().parent.parent / "data" / "calgary_traffic_inciden
 
 SOURCE = (
     "City of Calgary, Open Calgary Traffic Incidents (2025 subset bundled with IEEE YP "
-    "hackathon Case 5). The City's incident feed, not a complete police collision database."
+    "hackathon Case 5). The City's incident feed, not a complete police collision database. "
+    "Contains information licensed under the Open Government Licence - City of Calgary."
 )
 
 # The first sentence of a description names the event type.
