@@ -71,6 +71,15 @@ Every claim about the world that the engine, app, README or pitch relies on. One
   - "Starting with pandas 3.0, a dedicated string data type is enabled by default"
 - Consequence for the engine: it compares timestamps but never casts them to integers, so the resolution change does not affect results.
 
+### 8. ElevenLabs speech to text in the pinned SDK (elevenlabs 2.70.0) takes a file and a Scribe model id and returns the transcript as `text`
+
+- Source: ElevenLabs Python SDK reference. https://github.com/elevenlabs/elevenlabs-python/blob/main/reference.md and the response model at https://github.com/elevenlabs/elevenlabs-python/blob/main/src/elevenlabs/types/speech_to_text_chunk_response_model.py
+- Checked: 2026-10-03, read through a documentation mirror; the installed 2.70.0 package was also inspected (`speech_to_text.convert` has `file` and `model_id` parameters, and its docstring names `scribe_v2`).
+- Supporting lines:
+  - "client.speech_to_text.convert(... file="example_file", model_id="scribe_v2",)"
+  - Response model fields include "text: str" and "language_code: str".
+- Consequence: `app/briefing.py` sends the recorded WAV with `model_id="scribe_v2"` and reads `.text`. Not exercised against the live API from this environment (no key); the tests use a stand-in client.
+
 ## Unverified
 
 - **"City of Calgary Roads" as the name of the unit that funds or builds safety improvements.** The traffic safety page sits under calgary.ca/roads, but its metadata names the Mobility business unit. Use "The City of Calgary (Mobility)" unless a City source names a Roads unit.
