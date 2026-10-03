@@ -1,3 +1,5 @@
+import html
+import re
 import sys
 from pathlib import Path
 
@@ -30,11 +32,22 @@ def run_app():
     return at
 
 
+def page_text(at):
+    return html.unescape(" ".join(md.value for md in at.markdown))
+
+
+def shortlist_names(at):
+    ledger = next(md.value for md in at.markdown if 'class="dt ledger"' in md.value)
+    return [html.unescape(n) for n in re.findall(r'class="lg-name">(.*?)</span>', ledger)]
+
+
 def ask(at, text):
     at.text_input(key="planner_text").set_value(text)
     next(b for b in at.button if b.label == "Run request").click().run()
     assert not at.exception, at.exception
-    return next(i.value for i in at.info if "You asked" in i.value)
+    reply = at.session_state["reply"]["text"]
+    assert "You asked" in page_text(at) and reply in page_text(at)
+    return reply
 
 
 def test_typed_request_reranks_with_the_real_engine():
@@ -42,10 +55,10 @@ def test_typed_request_reranks_with_the_real_engine():
     reply = ask(at, EXAMPLE)
     assert "northwest Calgary only" in reply and "a budget of 5 intersections" in reply
     assert "count twice" in reply and "Backtest" in reply
-    assert any(h.value == "Top 5 on the map" for h in at.subheader)
-    assert any(h.value.endswith("of 5 the same as count-only") for h in at.subheader)
-    ranked = at.table[-1].value
-    assert len(ranked) == 5 and all(name.endswith("NW") for name in ranked["Location"])
+    assert "Top 5 on the map" in page_text(at)
+    assert re.search(r"\d of 5 the same as count-only", page_text(at))
+    names = shortlist_names(at)
+    assert len(names) == 5 and all(name.endswith("NW") for name in names)
     assert not at.warning
 
 
@@ -55,7 +68,7 @@ def test_follow_up_keeps_earlier_settings_and_reports_the_change():
     reply = ask(at, "Now show me the northeast instead.")
     assert "northeast Calgary only" in reply
     assert "replaces the top 5 for northwest Calgary" in reply
-    assert all(name.endswith("NE") for name in at.table[-1].value["Location"])
+    assert all(name.endswith("NE") for name in shortlist_names(at))
 
 
 def test_tune_respects_the_provincial_checkbox():
