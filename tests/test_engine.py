@@ -135,3 +135,10 @@ def test_run_is_under_two_seconds():
     start = time.perf_counter()
     run()
     assert time.perf_counter() - start < 2.0
+
+
+def test_count_only_and_movers_carry_display_names(result):
+    names = {r["location_key"]: r["name"] for r in result["top20"]}
+    for entry in result["baseline"]["top20"] + result["movers"]:
+        assert entry["name"].strip()
+        assert names.get(entry["location_key"], entry["name"]) == entry["name"]
