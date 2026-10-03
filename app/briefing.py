@@ -5,6 +5,7 @@ import streamlit as st
 FOOTER = "This ranks where harm was reported in 2025. It does not predict or prevent crashes."
 VOICE_ID = "JBFqnCBsd6RMkjVDRZzb"
 MODEL_ID = "eleven_multilingual_v2"
+QUADRANTS = {"nw", "ne", "sw", "se"}
 
 
 def location_names(result):
@@ -13,29 +14,34 @@ def location_names(result):
     return names
 
 
+def display_name(names, key):
+    # Locations outside the harm top 20 carry only their key, which is the lowercased name.
+    if key in names:
+        return names[key]
+    return " ".join(w.upper() if w in QUADRANTS else w.capitalize() for w in key.split())
+
+
 def build_script(result):
     names = location_names(result)
     data = result["dataset"]
     lines = [
         "Morning safety briefing.",
         f"{data['rows_used']:,} reported crashes, " + (
-            "ranked by harm rather than by count." if any(result["weights"][k] for k in ("w_severity", "w_trend"))
+            "ranked by harm." if any(result["weights"][k] for k in ("w_severity", "w_trend"))
             else "ranked by crash count."),
         "The top five:",
     ]
     for r in sorted(result["top20"], key=lambda r: r["rank"])[:5]:
-        line = f"Number {r['rank']}, {r['name']}, with {r['incidents']} incidents"
+        line = f"Number {r['rank']}, {r['name']}, {r['incidents']} incidents"
         if r["pedestrian_or_cyclist"]:
             line += f", {r['pedestrian_or_cyclist']} involving a pedestrian or cyclist"
         lines.append(line + ".")
     if result["movers"]:
-        lines.append("What changed against a count-only list:")
+        lines.append("Biggest changes against a count-only list:")
+    # Reasons stay on screen; read aloud they push the briefing well past 40 seconds.
     for m in result["movers"]:
-        name = names.get(m["location_key"], m["location_key"])
-        reason = m["reason"].strip()
-        if reason and reason[-1] not in ".!?":
-            reason += "."
-        lines.append(f"{name} moved {m['direction']} from {m['from_rank']} to {m['to_rank']}. {reason}")
+        name = display_name(names, m["location_key"])
+        lines.append(f"{name}, {m['direction']} from {m['from_rank']} to {m['to_rank']}.")
     lines.append(FOOTER)
     return " ".join(lines)
 

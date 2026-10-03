@@ -130,7 +130,13 @@ def test_briefing_uses_only_result_values():
     first = min(changed["top20"], key=lambda r: r["rank"])
     first["name"], first["incidents"] = "Test Street and Other Road", 4321
     changed_script = briefing.build_script(changed)
-    assert "Test Street and Other Road, with 4321 incidents" in changed_script
+    assert "Test Street and Other Road, 4321 incidents" in changed_script
+
+
+def test_display_name_prefers_result_name_then_tidies_key():
+    names = {"a & b ne": "A Street and B Avenue NE"}
+    assert briefing.display_name(names, "a & b ne") == "A Street and B Avenue NE"
+    assert briefing.display_name(names, "17 avenue & 84 street se") == "17 Avenue & 84 Street SE"
 
 
 def test_consistency_warnings():
@@ -179,6 +185,30 @@ def test_every_control_runs_against_engine(fake_engine):
     assert at.slider(key="w_trend").value == FIXTURE["weights"]["w_trend"]
     assert at.checkbox(key="exclude_provincial").value == FIXTURE["weights"]["exclude_provincial"]
     assert any(it["note"] in str(t.value) for t in at.table for it in FIXTURE["agent_iterations"])
+
+
+def test_page_with_real_engine():
+    from engine.agent import run
+
+    default, tuned = run(tune=False), run(tune=True)
+    at = run_app()
+    assert not at.warning, [w.value for w in at.warning]
+    assert any(f"{default['dataset']['rows_used']:,} used" in md.value for md in at.markdown)
+    assert at.slider(key="w_severity").value == default["weights"]["w_severity"]
+    assert at.checkbox(key="exclude_provincial").value == default["weights"]["exclude_provincial"]
+
+    button(at, TUNE_LABEL).click().run()
+    assert not at.exception, at.exception
+    assert not at.warning, [w.value for w in at.warning]
+    assert at.slider(key="w_severity").value == tuned["weights"]["w_severity"]
+    assert at.slider(key="w_trend").value == tuned["weights"]["w_trend"]
+    overlap = f"{tuned['metrics']['overlap_with_baseline']} of {len(tuned['top20'])} the same"
+    assert any(overlap in h.value for h in at.subheader)
+    page = " ".join(t.value.to_string() for t in at.table)
+    for row in tuned["top20"]:
+        assert row["name"] in page
+    for mover in tuned["movers"]:
+        assert mover["reason"] in " ".join(md.value for md in at.markdown)
 
 
 def test_briefing_audio_is_cached_per_script(no_engine, monkeypatch):
