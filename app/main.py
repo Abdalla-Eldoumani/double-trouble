@@ -66,11 +66,13 @@ for problem in consistency_warnings(result):
     st.warning(f"Result check: {problem}")
 
 data = result["dataset"]
-st.markdown(
-    f"**Data:** {data['source']}. {data['rows_loaded']:,} rows loaded, "
-    f"{data['rows_dropped']:,} dropped as {data['drop_reason']}. {data['rows_used']:,} used. "
-    "This is the City's incident feed, not a complete police collision database."
-)
+source = data["source"].rstrip(". ") + "."
+if "not a complete police collision database" not in source:
+    source += " This is the City's incident feed, not a complete police collision database."
+st.markdown(f"**Data:** {source}")
+st.markdown(f"**{data['rows_loaded']:,} rows loaded, {data['rows_dropped']:,} dropped, "
+            f"{data['rows_used']:,} used.**")
+st.caption(f"Dropped: {data['drop_reason']}")
 
 top = pd.DataFrame(result["top20"]).sort_values("rank")
 top["move"] = top.apply(movement, axis=1)
@@ -87,12 +89,17 @@ c3.checkbox("Exclude provincial roads", key="exclude_provincial")
 c4.button("Let the agent tune it", on_click=request_tuning, type="primary")
 
 m = result["metrics"]
-diff = m["backtest_agent"] - m["backtest_baseline"]
-st.markdown(
-    f"**Backtest** ({m['backtest_metric_name']}): count-only {m['backtest_baseline']:.3f}, "
-    f"these weights {m['backtest_agent']:.3f}, difference {diff:+.3f}. "
-    "One year of data, so small differences may be noise."
-)
+splits = [("backtest_metric_name", "backtest_baseline", "backtest_agent")]
+# The second split is optional in the contract; older results do not have it.
+if {"check_metric_name", "check_baseline", "check_agent"} <= m.keys():
+    splits.append(("check_metric_name", "check_baseline", "check_agent"))
+lines = []
+for label, base_key, agent_key in splits:
+    diff = 100 * (m[agent_key] - m[base_key])
+    lines.append(f"- {m[label][:1].upper()}{m[label][1:]}: count-only {m[base_key]:.2%}, "
+                 f"these weights {m[agent_key]:.2%} ({diff:+.2f} points)")
+st.markdown("**Backtest**\n" + "\n".join(lines) +
+            "\n\nOne year of data, so small differences may be noise.")
 
 if "tuned" in ss:
     tuned = ss.tuned
@@ -105,7 +112,7 @@ if "tuned" in ss:
             "Severity": f"{it['weights']['w_severity']:.2f}",
             "Trend": f"{it['weights']['w_trend']:.2f}",
             "Exclude provincial": "yes" if it["weights"]["exclude_provincial"] else "no",
-            "Backtest": f"{it['backtest_metric']:.3f}",
+            "Backtest": f"{it['backtest_metric']:.2%}",
             "Result": it["note"],
         }
         for it in tuned["agent_iterations"]
@@ -155,7 +162,7 @@ with left:
     st.table(pd.DataFrame([
         {
             "Rank": i,
-            "Location": names.get(r["location_key"], r["location_key"]),
+            "Location": briefing.display_name(names, r["location_key"]),
             "Incidents": r["incidents"],
             "Agent rank": str(agent_rank.get(r["location_key"], "out")),
         }
@@ -173,9 +180,11 @@ with right:
 
 # Movers
 st.subheader("Why it moved")
+if not result["movers"]:
+    st.markdown("No location changed rank against count-only at these weights.")
 for col, mv in zip(st.columns(max(len(result["movers"]), 1)), result["movers"]):
     with col:
-        st.markdown(f"**{names.get(mv['location_key'], mv['location_key'])}**")
+        st.markdown(f"**{briefing.display_name(names, mv['location_key'])}**")
         st.markdown(f"Moved {mv['direction']}: rank {mv['from_rank']} to {mv['to_rank']}")
         st.write(mv["reason"])
 
