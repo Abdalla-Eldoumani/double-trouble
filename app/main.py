@@ -11,7 +11,7 @@ import pydeck as pdk
 import streamlit as st
 
 from app import briefing
-from app.load import ResultShapeError, get_result
+from app.load import ResultShapeError, consistency_warnings, get_result
 
 st.set_page_config(page_title="Calgary crash shortlist", layout="wide")
 
@@ -61,6 +61,9 @@ try:
 except ResultShapeError as exc:
     st.error(str(exc))
     st.stop()
+
+for problem in consistency_warnings(result):
+    st.warning(f"Result check: {problem}")
 
 data = result["dataset"]
 st.markdown(
