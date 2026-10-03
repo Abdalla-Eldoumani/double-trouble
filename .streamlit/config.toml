@@ -1,0 +1,6 @@
+[theme]
+# Readable from the back of a room on a projector.
+baseFontSize = 20
+
+[browser]
+gatherUsageStats = false
