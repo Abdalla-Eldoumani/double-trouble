@@ -10,13 +10,18 @@ import pandas as pd
 import pydeck as pdk
 import streamlit as st
 
-from app import briefing
+from app import briefing, ui
 from app.load import ResultShapeError, consistency_warnings, get_result
 
 st.set_page_config(page_title="Calgary crash shortlist", layout="wide")
 
-# Blue and vermillion stay distinguishable for colour-blind viewers.
-COLOURS = {"up": [0, 114, 178], "down": [213, 94, 0], "same": [150, 150, 150]}
+TITLE = "Which Calgary locations keep hurting people?"
+LEDE = ("A count-only list treats a fender bender like a pedestrian hit. This one ranks 2025 crash "
+        "locations by reported harm, then tests its own weights against what happened later in the year.")
+# One accent for harm; "moved down" is a hollow ink ring so colour is never the only cue.
+FILL = {"up": [184, 58, 27, 235], "down": [251, 249, 244, 245], "same": [163, 156, 142, 235]}
+LINE = {"up": [251, 249, 244], "down": [28, 26, 23], "same": [251, 249, 244]}
+LABEL = {"up": [251, 249, 244], "down": [28, 26, 23], "same": [251, 249, 244]}
 ss = st.session_state
 
 
@@ -43,15 +48,25 @@ def movement(row):
     return "same"
 
 
-st.title("Which Calgary locations keep hurting people?")
-st.markdown("#### A count-only list treats a fender bender like a pedestrian hit. "
-            "This list ranks 2025 crash locations by reported harm and checks its weights "
-            "against what happened later in the year.")
+def weight_state():
+    weights = current_weights()
+    if "tuned" in ss and ss.tuned["weights"] == weights:
+        return "Chosen by the agent", True
+    if weights == ss.get("default_weights"):
+        if weights["w_severity"] == 0 and weights["w_trend"] == 0:
+            return "Engine default: count only", False
+        return "Engine default", False
+    return "Set by hand", False
+
+
+st.html(f"<style>{ui.CSS}</style>")
+st.markdown(ui.masthead(), unsafe_allow_html=True)
 
 try:
     if "w_severity" not in ss:
         result = get_result()
         set_weights(result["weights"])
+        ss.default_weights = current_weights()
     elif ss.pop("tune_requested", False):
         result = get_result(tune=True)
         ss.tuned = result
@@ -65,144 +80,111 @@ except ResultShapeError as exc:
 for problem in consistency_warnings(result):
     st.warning(f"Result check: {problem}")
 
-data = result["dataset"]
-source = data["source"].rstrip(". ") + "."
-if "not a complete police collision database" not in source:
-    source += " This is the City's incident feed, not a complete police collision database."
-st.markdown(f"**Data:** {source}")
-st.markdown(f"**{data['rows_loaded']:,} rows loaded, {data['rows_dropped']:,} dropped, "
-            f"{data['rows_used']:,} used.**")
-st.caption(f"Dropped: {data['drop_reason']}")
-
-top = pd.DataFrame(result["top20"]).sort_values("rank")
-top["move"] = top.apply(movement, axis=1)
 names = briefing.location_names(result)
 
-# Controls
-st.subheader("Weights")
-c1, c2, c3, c4 = st.columns([3, 3, 2, 2], vertical_alignment="bottom")
-c1.slider("Severity weight", 0.0, 1.0, step=0.05, key="w_severity",
-          help="How much pedestrian, cyclist, multi-vehicle and lane-blocking crashes count.")
-c2.slider("Trend weight", 0.0, 1.0, step=0.05, key="w_trend",
-          help="How much crashes late in the year count.")
-c3.checkbox("Exclude provincial roads", key="exclude_provincial")
-c4.button("Let the agent tune it", on_click=request_tuning, type="primary")
 
-m = result["metrics"]
-splits = [("backtest_metric_name", "backtest_baseline", "backtest_agent")]
-# The second split is optional in the contract; older results do not have it.
-if {"check_metric_name", "check_baseline", "check_agent"} <= m.keys():
-    splits.append(("check_metric_name", "check_baseline", "check_agent"))
-lines = []
-for label, base_key, agent_key in splits:
-    diff = 100 * (m[agent_key] - m[base_key])
-    lines.append(f"- {m[label][:1].upper()}{m[label][1:]}: count-only {m[base_key]:.2%}, "
-                 f"these weights {m[agent_key]:.2%} ({diff:+.2f} points)")
-st.markdown("**Backtest**\n" + "\n".join(lines) +
-            "\n\nOne year of data, so small differences may be noise.")
+def name_of(key):
+    return briefing.display_name(names, key)
 
-if "tuned" in ss:
-    tuned = ss.tuned
-    st.markdown("**What the agent tried** (last tuning run)")
-    if tuned["weights"] != current_weights():
-        st.caption("The sliders have changed since that run.")
-    st.table(pd.DataFrame([
-        {
-            "Step": it["iteration"],
-            "Severity": f"{it['weights']['w_severity']:.2f}",
-            "Trend": f"{it['weights']['w_trend']:.2f}",
-            "Exclude provincial": "yes" if it["weights"]["exclude_provincial"] else "no",
-            "Backtest": f"{it['backtest_metric']:.2%}",
-            "Result": it["note"],
-        }
-        for it in tuned["agent_iterations"]
-    ]), hide_index=True)
 
-# Map
-st.subheader("Top 20 on the map")
-st.markdown(
-    "Circle size is the harm score. "
-    "<span style='color:rgb(0,114,178)'><b>Blue</b></span>: moved up against count-only. "
-    "<span style='color:rgb(213,94,0)'><b>Orange</b></span>: moved down. "
-    "<span style='color:rgb(150,150,150)'><b>Grey</b></span>: unchanged.",
-    unsafe_allow_html=True,
-)
+st.markdown(ui.hero(TITLE, LEDE, result["dataset"]), unsafe_allow_html=True)
+st.markdown(ui.figures(result), unsafe_allow_html=True)
+
+with st.container(key="controls"):
+    state, agent_set = weight_state()
+    st.markdown(ui.controls_head(state, agent_set), unsafe_allow_html=True)
+    c1, c2, c3, c4 = st.columns([3, 3, 2.6, 2.2], vertical_alignment="bottom", gap="medium")
+    c1.slider("Severity weight", 0.0, 1.0, step=0.05, key="w_severity",
+              help="How much pedestrian, cyclist, multi-vehicle and lane-blocking crashes count.")
+    c2.slider("Trend weight", 0.0, 1.0, step=0.05, key="w_trend",
+              help="How much crashes late in the year count.")
+    c3.checkbox("Exclude provincial roads", key="exclude_provincial")
+    c4.button("Let the agent tune it", on_click=request_tuning, type="primary", width="stretch")
+
+# 01: map and movers
+st.markdown(ui.section(1, "The shortlist on the map",
+                       "Each circle is one of the top 20 locations at the current weights."),
+            unsafe_allow_html=True)
+top = pd.DataFrame(result["top20"]).sort_values("rank")
+top["move"] = top.apply(movement, axis=1)
 # Drawn last means drawn on top, so rank 1 stays visible where circles overlap.
 points = top.sort_values("rank", ascending=False).assign(
-    colour=top["move"].map(COLOURS),
-    radius=12 + 14 * top["score"] / top["score"].max(),
-    label=top["rank"].astype(str),
+    fill=lambda d: d["move"].map(FILL),
+    line=lambda d: d["move"].map(LINE),
+    text_colour=lambda d: d["move"].map(LABEL),
+    radius=lambda d: 12 + 14 * d["score"] / d["score"].max(),
+    label=lambda d: d["rank"].astype(str),
 )
 deck = pdk.Deck(
     map_style=pdk.map_styles.LIGHT,
     initial_view_state=pdk.ViewState(latitude=float(top["lat"].mean()),
-                                     longitude=float(top["lon"].mean()), zoom=10.3),
+                                     longitude=float(top["lon"].mean()), zoom=10.4),
     layers=[
         pdk.Layer("ScatterplotLayer", data=points, get_position=["lon", "lat"],
-                  get_radius="radius", radius_units="'pixels'", get_fill_color="colour",
-                  opacity=0.8, stroked=True, get_line_color=[255, 255, 255],
-                  line_width_min_pixels=1, pickable=True),
+                  get_radius="radius", radius_units="'pixels'", get_fill_color="fill",
+                  stroked=True, get_line_color="line", line_width_min_pixels=2, pickable=True),
         pdk.Layer("TextLayer", data=points, get_position=["lon", "lat"], get_text="label",
-                  get_size=14, get_color=[255, 255, 255], get_text_anchor="'middle'",
-                  get_alignment_baseline="'center'"),
+                  get_size=14, get_color="text_colour", font_family="'Geist Mono, monospace'",
+                  font_weight=600, get_text_anchor="'middle'", get_alignment_baseline="'center'"),
     ],
-    tooltip={"html": "<b>{name}</b><br/>Rank {rank} (count-only rank {baseline_rank})<br/>"
-                     "{incidents} incidents, {pedestrian_or_cyclist} pedestrian or cyclist<br/>"
-                     "{reason}"},
+    tooltip={
+        "html": "<b>{name}</b><br/>Rank {rank}, count-only rank {baseline_rank}<br/>"
+                "{incidents} incidents, {pedestrian_or_cyclist} pedestrian or cyclist<br/>"
+                "<span style='opacity:.75'>{reason}</span>",
+        "style": {"backgroundColor": "#1c1a17", "color": "#f4f0e8", "fontFamily": "Geist, sans-serif",
+                  "fontSize": "14px", "lineHeight": "1.45", "padding": "12px 14px",
+                  "borderRadius": "8px", "maxWidth": "340px"},
+    },
 )
-st.pydeck_chart(deck, height=560)
+map_col, movers_col = st.columns([1.65, 1], gap="large")
+with map_col:
+    st.pydeck_chart(deck, height=620)
+    st.markdown(ui.legend(), unsafe_allow_html=True)
+with movers_col:
+    st.markdown('<div class="dt ctl-title">Why it moved</div>', unsafe_allow_html=True)
+    st.markdown(ui.movers(result, name_of), unsafe_allow_html=True)
 
-# Side by side
-agent_rank = dict(zip(top["location_key"], top["rank"]))
-overlap = m["overlap_with_baseline"]
-st.subheader(f"{overlap} of {len(top)} the same as count-only")
-left, right = st.columns(2)
-with left:
-    st.markdown("**Count only**")
-    st.table(pd.DataFrame([
-        {
-            "Rank": i,
-            "Location": briefing.display_name(names, r["location_key"]),
-            "Incidents": r["incidents"],
-            "Agent rank": str(agent_rank.get(r["location_key"], "out")),
-        }
-        for i, r in enumerate(result["baseline"]["top20"], start=1)
-    ]), hide_index=True)
-with right:
-    st.markdown("**Ranked by harm**")
-    st.table(pd.DataFrame({
-        "Rank": top["rank"],
-        "Location": top["name"],
-        "Incidents": top["incidents"],
-        "Ped or cyclist": top["pedestrian_or_cyclist"],
-        "Count rank": top["baseline_rank"],
-    }), hide_index=True)
+# 02: count-only against harm
+overlap = result["metrics"]["overlap_with_baseline"]
+st.markdown(ui.section(2, f"{overlap} of {len(result['top20'])} the same as count-only",
+                       "Left, the 20 locations with the most incidents. Right, the 20 with the most "
+                       "reported harm. Lines join the same place; red lines climbed."),
+            unsafe_allow_html=True)
+st.markdown(ui.slope(result, name_of), unsafe_allow_html=True)
 
-# Movers
-st.subheader("Why it moved")
-if not result["movers"]:
-    st.markdown("No location changed rank against count-only at these weights.")
-for col, mv in zip(st.columns(max(len(result["movers"]), 1)), result["movers"]):
-    with col:
-        st.markdown(f"**{briefing.display_name(names, mv['location_key'])}**")
-        st.markdown(f"Moved {mv['direction']}: rank {mv['from_rank']} to {mv['to_rank']}")
-        st.write(mv["reason"])
+# 03: the agent's search
+if "tuned" in ss:
+    tuned = ss.tuned
+    its = tuned["agent_iterations"]
+    kept = sum(it["note"].startswith("kept") for it in its)
+    w = tuned["weights"]
+    note = (f"It tried {len(its)} weight settings on Jan-Aug, scored each on Sep-Dec, and kept a change "
+            f"only when it caught more later harm. {kept} changes were kept. Chosen: severity "
+            f"{w['w_severity']:.2f}, trend {w['w_trend']:.2f}.")
+    if w != current_weights():
+        note += " The sliders have changed since that run."
+    st.markdown(ui.section(3, "How the agent chose", note), unsafe_allow_html=True)
+    st.markdown(ui.trace(tuned), unsafe_allow_html=True)
+else:
+    st.markdown(ui.section(3, "How the agent chose"), unsafe_allow_html=True)
+    st.markdown('<div class="dt empty" style="margin-top:1.2rem"><b>The agent has not run yet.</b> '
+                'Press "Let the agent tune it" and it will rank on January to August, score each '
+                'weight setting on September to December, and keep only the settings that catch '
+                'more later harm.</div>', unsafe_allow_html=True)
 
-# Briefing
-st.subheader("Morning safety briefing")
+# 04: briefing
+st.markdown(ui.section(4, "Morning safety briefing"), unsafe_allow_html=True)
 script = briefing.build_script(result)
 key = briefing.api_key()
 if key:
-    if st.button("Play the morning safety briefing"):
+    if st.button("Play the morning safety briefing", type="secondary"):
         try:
             st.audio(briefing.synthesize(script, key), format="audio/mpeg")
         except Exception as exc:
             st.error(f"Audio failed ({type(exc).__name__}). The script is below.")
-    with st.expander("Script"):
-        st.write(script)
+    note = "Read by an ElevenLabs voice. Every name and number comes from the ranking above."
 else:
-    st.caption("Audio is off because no ElevenLabs key is set. The script:")
-    st.write(script)
+    note = "Audio is off because no ElevenLabs key is set. Every name and number comes from the ranking above."
+st.markdown(ui.briefing(script, note), unsafe_allow_html=True)
 
-st.divider()
-st.markdown(f"**{briefing.FOOTER}**")
+st.markdown(ui.footer(briefing.FOOTER, result["dataset"]["drop_reason"]), unsafe_allow_html=True)
