@@ -47,6 +47,31 @@ def validate(result):
     return problems
 
 
+def consistency_warnings(result):
+    """Contradictions inside a well-formed result, shown on the page rather than hidden."""
+    warnings = []
+    position = {r["location_key"]: i for i, r in enumerate(result["baseline"]["top20"], start=1)}
+    disagree = []
+    for r in result["top20"]:
+        if r["location_key"] in position:
+            wrong = position[r["location_key"]] != r["baseline_rank"]
+        else:
+            wrong = r["baseline_rank"] <= len(position)
+        if wrong:
+            disagree.append(r["name"])
+    if disagree:
+        warnings.append(f"Count-only rank differs between the two lists for {len(disagree)} "
+                        f"locations: {', '.join(disagree)}.")
+    overlap = len(position.keys() & {r["location_key"] for r in result["top20"]})
+    if overlap != result["metrics"]["overlap_with_baseline"]:
+        warnings.append(f"Reported overlap is {result['metrics']['overlap_with_baseline']} "
+                        f"but the two lists share {overlap} locations.")
+    unchanged = [m["location_key"] for m in result["movers"] if m["from_rank"] == m["to_rank"]]
+    if unchanged:
+        warnings.append(f"{len(unchanged)} listed movers have the same rank before and after.")
+    return warnings
+
+
 @st.cache_data(show_spinner=False)
 def _load_fixture():
     return json.loads(FIXTURE.read_text())
@@ -63,7 +88,7 @@ def get_result(weights=None, tune=False):
         import engine.agent  # noqa: F401
     except ImportError as exc:
         st.warning(FALLBACK_BANNER)
-        st.caption(f"Engine import failed: {exc}")
+        st.caption(f"Engine import failed: {exc}. The weight controls do not change sample data.")
         result = _load_fixture()
     else:
         result = _run_engine(weights, tune)
