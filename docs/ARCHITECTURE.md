@@ -20,9 +20,19 @@ flowchart TD
     MAP["Streamlit map and shortlist<br/>app/"]
     VOICE["Voice briefing<br/>app/"]
 
+    subgraph PLANNER["Voice planner"]
+        SPEAK["Planner speaks or types a request<br/>ElevenLabs speech to text, app/briefing.py"]
+        PARSE["Parse to constraints<br/>recent weight, quadrant, budget, weights<br/>engine/planner.py"]
+        COMPARE["Compare old and new shortlist<br/>engine/planner.py"]
+        EXPLAIN["Explain from the computed numbers<br/>ElevenLabs text to speech"]
+    end
+
     CSV --> CLEAN --> KEY --> SIG --> LOOP --> RANK --> JSON
     JSON --> MAP
     JSON --> VOICE
+    SPEAK --> PARSE -->|constraints| SIG
+    JSON --> COMPARE --> EXPLAIN
+    COMPARE --> MAP
 ```
 
 ## Why this design
@@ -36,3 +46,5 @@ The agent tests its own weights by ranking on the earlier months and checking ho
 A full run, including the 15-candidate search, finishes in under 2 seconds on a laptop, so the app can re-run the engine live while someone moves a slider.
 
 The engine reads the same columns as the Open Calgary Traffic Incidents feed, so a newer export loads with no change to cleaning or scoring; only the date windows at the top of engine/agent.py move to the new year.
+
+The voice planner parses requests with fixed rules rather than a language model, so the same words always give the same constraints, it works offline, and a request it cannot read changes nothing instead of guessing.

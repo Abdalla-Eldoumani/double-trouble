@@ -78,12 +78,15 @@ def _load_fixture():
 
 
 @st.cache_data(show_spinner="Ranking locations...")
-def _run_engine(weights, tune):
+def _run_engine(weights, tune, constraints=None):
     from engine.agent import run
-    return run(weights=weights, tune=tune)
+    # Only pass constraints once the planner has set some, so older engines keep working.
+    if constraints is None:
+        return run(weights=weights, tune=tune)
+    return run(weights=weights, tune=tune, constraints=constraints)
 
 
-def get_result(weights=None, tune=False):
+def get_result(weights=None, tune=False, constraints=None):
     try:
         import engine.agent  # noqa: F401
     except ImportError as exc:
@@ -91,7 +94,7 @@ def get_result(weights=None, tune=False):
         st.caption(f"Engine import failed: {exc}. The weight controls do not change sample data.")
         result = _load_fixture()
     else:
-        result = _run_engine(weights, tune)
+        result = _run_engine(weights, tune, constraints)
     problems = validate(result)
     if problems:
         raise ResultShapeError("The result is missing fields the app needs: " + "; ".join(problems))

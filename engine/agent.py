@@ -22,6 +22,11 @@ GRID = [(s, t) for t in (0.0, 0.5, 1.0) for s in (0.0, 0.25, 0.5, 0.75, 1.0)]
 # Deerfoot and Stoney are maintained by the province, not the City (docs/FACTS.md).
 DEFAULT_WEIGHTS = {"w_severity": 0.0, "w_trend": 0.0, "exclude_provincial": True}
 
+# What a planner can ask for on top of the weights: recent crashes counted more, one quadrant, a smaller budget.
+DEFAULT_CONSTRAINTS = {"recent_weight": 1.0, "region": None, "budget": TOP_N}
+REGIONS = ("NE", "NW", "SE", "SW")
+MAX_RECENT_WEIGHT = 5.0
+
 METRIC_NAME = "share of Sep-Dec severity points captured by a top 20 ranked on Jan-Aug"
 CHECK_METRIC_NAME = "share of Jul-Dec severity points captured by a top 20 ranked on Jan-Jun"
 
@@ -40,12 +45,35 @@ def check_weights(weights: dict | None) -> dict:
     return w
 
 
-def backtest(df: pd.DataFrame, train: tuple, test: tuple, w: dict) -> tuple[float, int, int]:
-    """Share of test-window severity points that fall in the train-window top 20."""
-    top = rank(signals(df, *train), w["w_severity"], w["w_trend"], w["exclude_provincial"]).head(TOP_N)
+def check_constraints(constraints: dict | None) -> dict:
+    c = {**DEFAULT_CONSTRAINTS, **(constraints or {})}
+    unknown = set(c) - set(DEFAULT_CONSTRAINTS)
+    if unknown:
+        raise ValueError(f"unknown constraint keys: {sorted(unknown)}")
+    r = c["recent_weight"]
+    if isinstance(r, bool) or not isinstance(r, (int, float)) or not 1 <= r <= MAX_RECENT_WEIGHT:
+        raise ValueError(f"recent_weight must be a number in [1, {MAX_RECENT_WEIGHT:g}], got {r!r}")
+    c["recent_weight"] = float(r)
+    if c["region"] is not None and c["region"] not in REGIONS:
+        raise ValueError(f"region must be one of {REGIONS} or None, got {c['region']!r}")
+    b = c["budget"]
+    if isinstance(b, bool) or not isinstance(b, int) or not 1 <= b <= TOP_N:
+        raise ValueError(f"budget must be a whole number from 1 to {TOP_N}, got {b!r}")
+    return c
+
+
+def backtest(
+    df: pd.DataFrame, train: tuple, test: tuple, w: dict,
+    recent_weight: float = 1.0, keep: set | None = None, n: int = TOP_N,
+) -> tuple[float, int, int]:
+    """Share of test-window severity points that fall in the train-window top n."""
+    sig = signals(df, *train, recent_weight=recent_weight)
+    top = rank(sig, w["w_severity"], w["w_trend"], w["exclude_provincial"], keep).head(n)
     later = signals(df, *test)
     if w["exclude_provincial"]:
         later = later[~later["provincial"]]
+    if keep is not None:
+        later = later[later.index.isin(keep)]
     total = int(later["severity_points"].sum())
     caught = int(later["severity_points"].reindex(top.index, fill_value=0).sum())
     return caught / total, caught, total
@@ -55,14 +83,14 @@ def _weights(s: float, t: float, exclude: bool) -> dict:
     return {"w_severity": s, "w_trend": t, "exclude_provincial": exclude}
 
 
-def search(df: pd.DataFrame, exclude: bool) -> tuple[dict, list]:
+def search(df: pd.DataFrame, exclude: bool, recent_weight: float = 1.0, keep: set | None = None) -> tuple[dict, list]:
     # Simplest candidates first, and a candidate replaces the best only if strictly better,
     # so a tie always keeps the simpler weights.
     plan = sorted(GRID, key=lambda st: (st[0] + st[1], st[1]))
     iterations, best, best_caught = [], None, -1
     for i, (s, t) in enumerate(plan):
         w = _weights(s, t, exclude)
-        share, caught, total = backtest(df, TRAIN, TEST, w)
+        share, caught, total = backtest(df, TRAIN, TEST, w, recent_weight, keep)
         if best is None:
             note = f"baseline: count-only captures {caught} of {total} points"
         elif caught > best_caught:
@@ -103,27 +131,11 @@ def mover_reason(row: pd.Series, avg: float, w: dict) -> str:
     return why
 
 
-def run(weights: dict | None = None, tune: bool = True) -> dict:
+def run(weights: dict | None = None, tune: bool = True, constraints: dict | None = None) -> dict:
     w = check_weights(weights)
+    c = check_constraints(constraints)
     df, info = load()
     df = add_points(df)
-
-    if tune:
-        w, iterations = search(df, w["exclude_provincial"])
-    else:
-        share, caught, total = backtest(df, TRAIN, TEST, w)
-        iterations = [{
-            "iteration": 0, "weights": w, "backtest_metric": round(share, 4),
-            "note": f"given weights, not tuned: {caught} of {total} points",
-        }]
-
-    count_only = _weights(0.0, 0.0, w["exclude_provincial"])
-    sig = signals(df, *YEAR)
-    base = baseline(sig, w["exclude_provincial"])
-    final = rank(sig, w["w_severity"], w["w_trend"], w["exclude_provincial"])
-    final["baseline_rank"] = base["rank"].reindex(final.index)
-    top = final.head(TOP_N)
-    base_top = set(base.index[:TOP_N])
 
     places = df.groupby("location_key").agg(
         name=("name", lambda s: s.mode().iloc[0]),
@@ -131,6 +143,25 @@ def run(weights: dict | None = None, tune: bool = True) -> dict:
         lon=("longitude", "median"),
         quadrant=("quadrant", lambda s: s.mode().iloc[0]),
     )
+    keep = set(places.index[places["quadrant"] == c["region"]]) if c["region"] else None
+    recent = c["recent_weight"]
+
+    if tune:
+        w, iterations = search(df, w["exclude_provincial"], recent, keep)
+    else:
+        share, caught, total = backtest(df, TRAIN, TEST, w, recent, keep)
+        iterations = [{
+            "iteration": 0, "weights": w, "backtest_metric": round(share, 4),
+            "note": f"given weights, not tuned: {caught} of {total} points",
+        }]
+
+    count_only = _weights(0.0, 0.0, w["exclude_provincial"])
+    sig = signals(df, *YEAR, recent_weight=recent)
+    base = baseline(sig, w["exclude_provincial"], keep)
+    final = rank(sig, w["w_severity"], w["w_trend"], w["exclude_provincial"], keep)
+    final["baseline_rank"] = base["rank"].reindex(final.index)
+    top = final.head(TOP_N)
+    base_top = set(base.index[:TOP_N])
 
     top20 = []
     for key, r in top.iterrows():
@@ -166,8 +197,12 @@ def run(weights: dict | None = None, tune: bool = True) -> dict:
         for key in change[change > 0].sort_values(ascending=False, kind="stable").index[:3]
     ]
 
-    base_share = backtest(df, TRAIN, TEST, count_only)[0]
-    agent_share = backtest(df, TRAIN, TEST, w)[0]
+    base_share = backtest(df, TRAIN, TEST, count_only, 1.0, keep)[0]
+    agent_share = backtest(df, TRAIN, TEST, w, recent, keep)[0]
+    n = c["budget"]
+    plan_base = backtest(df, TRAIN, TEST, count_only, 1.0, keep, n)
+    plan_agent = backtest(df, TRAIN, TEST, w, recent, keep, n)
+    where = f"the {c['region']} quadrant" if c["region"] else "the city"
     return {
         "schema_version": 1,
         "dataset": {k: info[k] for k in ("source", "rows_loaded", "rows_dropped", "drop_reason", "rows_used")},
@@ -179,12 +214,24 @@ def run(weights: dict | None = None, tune: bool = True) -> dict:
         "agent_iterations": iterations,
         "metrics": {
             "overlap_with_baseline": len(set(top.index) & base_top),
-            "backtest_metric_name": METRIC_NAME,
+            "backtest_metric_name": METRIC_NAME + (f" in the {c['region']} quadrant" if c["region"] else ""),
             "backtest_baseline": round(base_share, 4),
             "backtest_agent": round(agent_share, 4),
-            "check_metric_name": CHECK_METRIC_NAME,
-            "check_baseline": round(backtest(df, CHECK_TRAIN, CHECK_TEST, count_only)[0], 4),
-            "check_agent": round(backtest(df, CHECK_TRAIN, CHECK_TEST, w)[0], 4),
+            "check_metric_name": CHECK_METRIC_NAME + (f" in the {c['region']} quadrant" if c["region"] else ""),
+            "check_baseline": round(backtest(df, CHECK_TRAIN, CHECK_TEST, count_only, 1.0, keep)[0], 4),
+            "check_agent": round(backtest(df, CHECK_TRAIN, CHECK_TEST, w, recent, keep)[0], 4),
+        },
+        "plan": {
+            "constraints": c,
+            "shortlist": list(top.index[:n]),
+            "baseline_shortlist": list(base.index[:n]),
+            "overlap": len(set(top.index[:n]) & set(base.index[:n])),
+            "metric_name": f"share of Sep-Dec severity points in {where} captured by a top {n} ranked on Jan-Aug",
+            "backtest_baseline": round(plan_base[0], 4),
+            "backtest_agent": round(plan_agent[0], 4),
+            "points_baseline": plan_base[1],
+            "points_agent": plan_agent[1],
+            "points_total": plan_agent[2],
         },
         "movers": movers,
         "top20": top20,
