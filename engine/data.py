@@ -1,5 +1,6 @@
 """Load the Calgary traffic incident feed, drop non-crash rows, assign a location key."""
 
+import html
 import re
 from pathlib import Path
 
@@ -28,13 +29,16 @@ ABBREVIATIONS = {
     "av": "avenue", "ave": "avenue", "blvd": "boulevard", "cl": "close", "cr": "crescent",
     "ct": "court", "dr": "drive", "ga": "gate", "gr": "green", "hwy": "highway",
     "ln": "lane", "pl": "place", "py": "parkway", "rd": "road", "st": "street",
-    "tr": "trail", "wy": "way",
+    "t": "trail", "tr": "trail", "wy": "way",
 }
+# The feed sometimes drops "Trail" from the two provincial freeways.
+SHORT_NAMES = {"deerfoot": "deerfoot trail", "stoney": "stoney trail"}
 # "soutbound" is a typo in the feed; ramps and exits belong to the interchange they serve.
 DIRECTION = re.compile(r"\b(?:north|south?|east|west)bound\b|\b(?:exit|ramp)\b")
+# One or more connector words in a row, so "on ramp to" (with "ramp" removed) splits once.
 CONNECTOR = re.compile(
-    r"\s+(?:and|at|approaching|after|before|near|past|between|b/w|to|onto|on"
-    r"|(?:north|south|east|west) of)\s+"
+    r"\s+(?:(?:and|&|at|approaching|after|before|near|past|passed|between|b/w|from|to|onto|on"
+    r"|(?:north|south|east|west) of)\s+)+"
 )
 QUADRANT = re.compile(r"\s+(ne|nw|se|sw|n|s|e|w)$")
 
@@ -49,14 +53,13 @@ def location_key(info: str) -> str:
     Street order is sorted so 'A and B' and 'B and A' are one intersection. The quadrant
     stays in the key because 17 Avenue and 36 Street exists in both SE and SW.
     """
-    s = DIRECTION.sub("", " ".join(info.lower().split())).strip()
+    s = re.sub(r"\band(?=\d)", "and ", html.unescape(info).lower())  # "and17 avenue"
+    s = DIRECTION.sub("", " ".join(s.split())).strip()
     m = QUADRANT.search(s)
     s = QUADRANT.sub("", s)
-    streets = {
-        " ".join(ABBREVIATIONS.get(w, w) for w in part.split())
-        for part in CONNECTOR.split(s)
-        if part.strip()
-    }
+    parts = [QUADRANT.sub("", part) for part in CONNECTOR.split(s)]  # "39 avenue ne & 32 street"
+    streets = {" ".join(ABBREVIATIONS.get(w, w) for w in part.split()) for part in parts if part.strip()}
+    streets = {SHORT_NAMES.get(st, st) for st in streets}
     return " & ".join(sorted(streets)) + (f" {m.group(1)}" if m else "")
 
 
