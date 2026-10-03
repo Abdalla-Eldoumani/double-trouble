@@ -214,10 +214,10 @@ def run(weights: dict | None = None, tune: bool = True, constraints: dict | None
         "agent_iterations": iterations,
         "metrics": {
             "overlap_with_baseline": len(set(top.index) & base_top),
-            "backtest_metric_name": METRIC_NAME,
+            "backtest_metric_name": METRIC_NAME + (f" in the {c['region']} quadrant" if c["region"] else ""),
             "backtest_baseline": round(base_share, 4),
             "backtest_agent": round(agent_share, 4),
-            "check_metric_name": CHECK_METRIC_NAME,
+            "check_metric_name": CHECK_METRIC_NAME + (f" in the {c['region']} quadrant" if c["region"] else ""),
             "check_baseline": round(backtest(df, CHECK_TRAIN, CHECK_TEST, count_only, 1.0, keep)[0], 4),
             "check_agent": round(backtest(df, CHECK_TRAIN, CHECK_TEST, w, recent, keep)[0], 4),
         },
