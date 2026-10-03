@@ -1,4 +1,5 @@
 import copy
+import html
 import importlib
 import json
 import re
@@ -13,7 +14,7 @@ from streamlit.testing.v1 import AppTest
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from app import briefing, load  # noqa: E402
+from app import briefing, load, ui  # noqa: E402
 
 MAIN = str(ROOT / "app" / "main.py")
 FIXTURE = json.loads((ROOT / "contract" / "sample_output.json").read_text())
@@ -83,6 +84,10 @@ def run_app():
     at.run()
     assert not at.exception, at.exception
     return at
+
+
+def page_text(at):
+    return html.unescape(" ".join(md.value for md in at.markdown))
 
 
 def button(at, label):
@@ -158,7 +163,7 @@ def test_page_on_fixture_shows_banner_and_result_numbers(no_engine):
     data = FIXTURE["dataset"]
     assert any(f"{data['rows_used']:,} used" in md.value for md in at.markdown)
     overlap = f"{FIXTURE['metrics']['overlap_with_baseline']} of {len(FIXTURE['top20'])} the same"
-    assert any(overlap in h.value for h in at.subheader)
+    assert overlap in page_text(at)
     assert briefing.FOOTER in at.markdown[-1].value
     assert at.slider(key="w_severity").value == FIXTURE["weights"]["w_severity"]
     assert PLAY_LABEL not in [b.label for b in at.button]
@@ -184,7 +189,7 @@ def test_every_control_runs_against_engine(fake_engine):
     assert at.slider(key="w_severity").value == FIXTURE["weights"]["w_severity"]
     assert at.slider(key="w_trend").value == FIXTURE["weights"]["w_trend"]
     assert at.checkbox(key="exclude_provincial").value == FIXTURE["weights"]["exclude_provincial"]
-    assert any(it["note"] in str(t.value) for t in at.table for it in FIXTURE["agent_iterations"])
+    assert all(it["note"] in page_text(at) for it in FIXTURE["agent_iterations"])
 
 
 def test_page_with_real_engine():
@@ -203,12 +208,14 @@ def test_page_with_real_engine():
     assert at.slider(key="w_severity").value == tuned["weights"]["w_severity"]
     assert at.slider(key="w_trend").value == tuned["weights"]["w_trend"]
     overlap = f"{tuned['metrics']['overlap_with_baseline']} of {len(tuned['top20'])} the same"
-    assert any(overlap in h.value for h in at.subheader)
-    page = " ".join(t.value.to_string() for t in at.table)
+    page = page_text(at)
+    assert overlap in page
     for row in tuned["top20"]:
-        assert row["name"] in page
+        assert ui._clip(row["name"], 50) in page
     for mover in tuned["movers"]:
-        assert mover["reason"] in " ".join(md.value for md in at.markdown)
+        assert mover["reason"] in page
+    for it in tuned["agent_iterations"]:
+        assert it["note"] in page
 
 
 def test_briefing_audio_is_cached_per_script(no_engine, monkeypatch):
@@ -232,3 +239,21 @@ def test_briefing_audio_is_cached_per_script(no_engine, monkeypatch):
     assert not at.error
     assert len(requests) == 1
     assert requests[0]["text"] == briefing.build_script(FIXTURE)
+
+
+def test_slope_draws_one_line_per_location_and_escapes_names():
+    result = consistent(FIXTURE)
+    result["top20"][0]["name"] = "A & B <Street>"
+    svg = ui.slope(result, lambda key: key)
+    base = {b["location_key"] for b in result["baseline"]["top20"]}
+    new = [r for r in result["top20"] if r["location_key"] not in base]
+    assert svg.count("<path ") == len(base) + len(new)
+    assert "A &amp; B &lt;Street&gt;" in svg and "<Street>" not in svg
+
+
+def test_trace_marks_only_the_chosen_weights():
+    tuned = copy.deepcopy(FIXTURE)
+    tuned["weights"] = tuned["agent_iterations"][1]["weights"]
+    out = ui.trace(tuned)
+    assert out.count('<span class="tag">chosen</span>') == 1
+    assert out.index("chosen") > out.index(tuned["agent_iterations"][0]["note"])
