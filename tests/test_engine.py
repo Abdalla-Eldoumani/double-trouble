@@ -64,6 +64,19 @@ def test_baseline_is_true_count_only_order(result):
         assert counts[b["location_key"]] == b["incidents"]
 
 
+@pytest.mark.parametrize("name, key", [
+    ("Southbound Deerfoot Trail approaching Glenmore Trail SE", "deerfoot trail & glenmore trail se"),
+    (" Glenmore Trail and  Deerfoot Trail SE ", "deerfoot trail & glenmore trail se"),
+    ("Southbound Deerfoot Trail ramp to 16 Avenue NE", "16 avenue & deerfoot trail ne"),
+    ("Soutbound Deerfoot Trail exit to McKnight Blvd NE", "deerfoot trail & mcknight boulevard ne"),
+    ("Westbound Stoney Trail after McKenzie Lake Boulevard SE", "mckenzie lake boulevard & stoney trail se"),
+    ("17 Avenue and 36 Street SE", "17 avenue & 36 street se"),
+    ("17 Avenue and 36 Street SW", "17 avenue & 36 street sw"),
+])
+def test_location_key_merges_one_intersection(name, key):
+    assert location_key(name) == key
+
+
 def test_rows_add_up(result):
     d = result["dataset"]
     assert d["rows_loaded"] == len(pd.read_csv(CSV))
