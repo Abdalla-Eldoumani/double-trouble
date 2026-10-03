@@ -17,6 +17,18 @@ from app import briefing, load  # noqa: E402
 
 MAIN = str(ROOT / "app" / "main.py")
 FIXTURE = json.loads((ROOT / "contract" / "sample_output.json").read_text())
+NUMBER = r"\d[\d,]*(?:\.\d+)?"
+
+
+def consistent(result):
+    # The fixture's count ranks and movers contradict each other; real engine output should not.
+    result = copy.deepcopy(result)
+    position = {r["location_key"]: i for i, r in enumerate(result["baseline"]["top20"], start=1)}
+    for extra, r in enumerate(result["top20"], start=len(position) + 1):
+        r["baseline_rank"] = position.get(r["location_key"], extra)
+    for m in result["movers"]:
+        m["to_rank"] = m["from_rank"] + 1
+    return result
 TUNE_LABEL = "Let the agent tune it"
 PLAY_LABEL = "Play the morning safety briefing"
 
@@ -41,7 +53,7 @@ def fake_engine(monkeypatch):
 
     def run(weights=None, tune=True):
         calls.append({"weights": weights, "tune": tune})
-        result = copy.deepcopy(FIXTURE)
+        result = consistent(FIXTURE)
         result["dataset"]["rows_used"] = 1234
         return result
 
@@ -63,7 +75,7 @@ def numbers_in(value):
         return set()
     if isinstance(value, (int, float)):
         return {str(value), f"{value:g}"}
-    return set(re.findall(r"\d+(?:\.\d+)?", str(value)))
+    return {n.replace(",", "") for n in re.findall(NUMBER, str(value))}
 
 
 def run_app():
@@ -110,7 +122,7 @@ def test_get_result_rejects_missing_fields(fake_engine, monkeypatch):
 def test_briefing_uses_only_result_values():
     script = briefing.build_script(FIXTURE)
     body = script.replace(briefing.FOOTER, "")
-    assert set(re.findall(r"\d+(?:\.\d+)?", body)) <= numbers_in(FIXTURE)
+    assert {n.replace(",", "") for n in re.findall(NUMBER, body)} <= numbers_in(FIXTURE)
     for row in sorted(FIXTURE["top20"], key=lambda r: r["rank"])[:5]:
         assert row["name"] in script
 
@@ -119,6 +131,19 @@ def test_briefing_uses_only_result_values():
     first["name"], first["incidents"] = "Test Street and Other Road", 4321
     changed_script = briefing.build_script(changed)
     assert "Test Street and Other Road, with 4321 incidents" in changed_script
+
+
+def test_consistency_warnings():
+    assert load.consistency_warnings(consistent(FIXTURE)) == []
+    warnings = load.consistency_warnings(FIXTURE)
+    assert len(warnings) == 2
+    assert "Eastbound Stoney Trail and Sarcee Trail NW" in warnings[0]
+    assert "3 listed movers have the same rank" in warnings[1]
+
+    wrong_overlap = consistent(FIXTURE)
+    wrong_overlap["metrics"]["overlap_with_baseline"] = 20
+    assert load.consistency_warnings(wrong_overlap) == [
+        "Reported overlap is 20 but the two lists share 17 locations."]
 
 
 def test_page_on_fixture_shows_banner_and_result_numbers(no_engine):
