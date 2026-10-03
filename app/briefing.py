@@ -18,7 +18,7 @@ def build_script(result):
     data = result["dataset"]
     lines = [
         "Morning safety briefing.",
-        f"{data['rows_used']} reported crashes, ranked by harm rather than by count.",
+        f"{data['rows_used']:,} reported crashes, ranked by harm rather than by count.",
         "The top five:",
     ]
     for r in sorted(result["top20"], key=lambda r: r["rank"])[:5]:
