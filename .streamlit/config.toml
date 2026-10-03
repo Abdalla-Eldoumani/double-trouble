@@ -33,3 +33,9 @@ weight = "100 900"
 family = "Fraunces"
 url = "app/static/fonts/fraunces.woff2"
 weight = "100 900"
+
+[[theme.fontFaces]]
+family = "Fraunces"
+url = "app/static/fonts/fraunces-italic.woff2"
+weight = "100 900"
+style = "italic"
