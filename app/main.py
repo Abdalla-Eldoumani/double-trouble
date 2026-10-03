@@ -35,6 +35,63 @@ def request_tuning():
     ss.tune_requested = True
 
 
+def submit_typed():
+    text = ss.get("planner_text", "").strip()
+    if text:
+        ss.pending_request = text
+
+
+def submit_example(text):
+    ss.planner_text = text
+    ss.pending_request = text
+
+
+def submit_voice():
+    audio = ss.get("planner_audio")
+    if audio is None:
+        return
+    try:
+        text = briefing.transcribe(("request.wav", audio.getvalue(), "audio/wav"), briefing.api_key())
+    except Exception as exc:
+        ss.planner_error = f"Speech to text failed ({type(exc).__name__}). Type the request instead."
+        return
+    if text:
+        ss.planner_text = text
+        ss.pending_request = text
+    else:
+        ss.planner_error = "No speech was picked up. Try again or type the request."
+
+
+def apply_request(text):
+    """Parse the request, re-rank with it, and keep a spoken reply that compares old and new."""
+    from engine.agent import DEFAULT_WEIGHTS
+    from engine.planner import compare, explain, parse
+
+    asked = parse(text)
+    if asked["reset"]:
+        constraints, weights = dict(asked["constraints"]), dict(DEFAULT_WEIGHTS)
+    else:
+        constraints = {**(ss.get("constraints") or {}), **asked["constraints"]}
+        weights = {**current_weights(), **asked["weights"]}
+    ss.constraints = constraints
+    result = get_result(weights, tune=asked["tune"], constraints=constraints)
+    if asked["tune"]:
+        ss.tuned = result
+    set_weights(result["weights"])
+    previous = ss.get("last_result")
+    if previous is not None and "plan" not in previous:
+        previous = None
+    reply = {"request": text, "text": explain(result, compare(previous, result), asked["heard"])}
+    key = briefing.api_key()
+    if key:
+        try:
+            reply["audio"], reply["fresh"] = briefing.synthesize(reply["text"], key), True
+        except Exception as exc:
+            reply["audio_error"] = f"Audio failed ({type(exc).__name__}). The reply is above."
+    ss.reply = reply
+    return result
+
+
 def movement(row):
     if row["rank"] < row["baseline_rank"]:
         return "up"
@@ -48,16 +105,26 @@ st.markdown("#### A count-only list treats a fender bender like a pedestrian hit
             "This list ranks 2025 crash locations by reported harm and checks its weights "
             "against what happened later in the year.")
 
+request = ss.pop("pending_request", None)
 try:
-    if "w_severity" not in ss:
+    first_load = "w_severity" not in ss
+    if first_load:
         result = get_result()
         set_weights(result["weights"])
+    if request is not None:
+        try:
+            result = apply_request(request)
+        except ImportError:
+            st.warning("The planner needs the engine, which is not connected.")
+            result = get_result(current_weights(), tune=False)
     elif ss.pop("tune_requested", False):
-        result = get_result(tune=True)
+        # Tune within the user's provincial choice and planner constraints, not the defaults.
+        result = get_result({"exclude_provincial": ss.exclude_provincial}, tune=True,
+                            constraints=ss.get("constraints"))
         ss.tuned = result
         set_weights(result["weights"])
-    else:
-        result = get_result(current_weights(), tune=False)
+    elif not first_load:
+        result = get_result(current_weights(), tune=False, constraints=ss.get("constraints"))
 except ResultShapeError as exc:
     st.error(str(exc))
     st.stop()
@@ -66,11 +133,45 @@ for problem in consistency_warnings(result):
     st.warning(f"Result check: {problem}")
 
 data = result["dataset"]
+caveat = "This is the City's incident feed, not a complete police collision database."
 st.markdown(
-    f"**Data:** {data['source']}. {data['rows_loaded']:,} rows loaded, "
-    f"{data['rows_dropped']:,} dropped as {data['drop_reason']}. {data['rows_used']:,} used. "
-    "This is the City's incident feed, not a complete police collision database."
+    f"**Data:** {data['source'].rstrip('.')}. {data['rows_loaded']:,} rows loaded, "
+    f"{data['rows_dropped']:,} dropped as {data['drop_reason']}. {data['rows_used']:,} used."
+    + ("" if "not a complete police collision database" in data["source"] else f" {caveat}")
 )
+
+# Voice planner
+EXAMPLES = [
+    "Prioritize recent crashes twice as much, only show northwest Calgary, "
+    "and assume we can only investigate five intersections.",
+    "Focus on pedestrians and cyclists.",
+    "Now show me the northeast instead.",
+    "Reset.",
+]
+st.subheader("Ask the planner")
+voice_key = briefing.api_key()
+if voice_key:
+    st.audio_input("Speak a request", key="planner_audio", on_change=submit_voice)
+else:
+    st.caption("Voice input is off because no ElevenLabs key is set. Type a request instead.")
+with st.form("planner"):
+    st.text_input("Type a request", key="planner_text", placeholder=EXAMPLES[0])
+    st.form_submit_button("Run request", on_click=submit_typed, type="primary")
+for col, example in zip(st.columns(len(EXAMPLES)), EXAMPLES):
+    col.button(example if len(example) < 40 else "Recent x2, northwest, budget 5",
+               on_click=submit_example, args=(example,), key=f"example_{example[:12]}")
+if "planner_error" in ss:
+    st.error(ss.pop("planner_error"))
+if ss.get("reply"):
+    reply = ss.reply
+    st.info(f'You asked: "{reply["request"]}"\n\n{reply["text"]}')
+    if reply.get("audio"):
+        st.audio(reply["audio"], format="audio/mpeg", autoplay=reply.pop("fresh", False))
+    if reply.get("audio_error"):
+        st.error(reply["audio_error"])
+
+plan = result.get("plan")
+budget = plan["constraints"]["budget"] if plan else len(result["top20"])
 
 top = pd.DataFrame(result["top20"]).sort_values("rank")
 top["move"] = top.apply(movement, axis=1)
@@ -94,6 +195,16 @@ st.markdown(
     "One year of data, so small differences may be noise."
 )
 
+if plan and plan["constraints"] != {"recent_weight": 1.0, "region": None, "budget": 20}:
+    c = plan["constraints"]
+    st.markdown(
+        f"**Planner settings:** top {c['budget']}"
+        f"{', ' + c['region'] + ' only' if c['region'] else ', all of Calgary'}"
+        f"{', July to December crashes count ' + format(c['recent_weight'], 'g') + ' times' if c['recent_weight'] != 1 else ''}. "
+        f"**Backtest** ({plan['metric_name']}): count-only {plan['backtest_baseline']:.3f}, "
+        f"these settings {plan['backtest_agent']:.3f}."
+    )
+
 if "tuned" in ss:
     tuned = ss.tuned
     st.markdown("**What the agent tried** (last tuning run)")
@@ -112,7 +223,7 @@ if "tuned" in ss:
     ]), hide_index=True)
 
 # Map
-st.subheader("Top 20 on the map")
+st.subheader(f"Top {budget} on the map")
 st.markdown(
     "Circle size is the harm score. "
     "<span style='color:rgb(0,114,178)'><b>Blue</b></span>: moved up against count-only. "
@@ -121,15 +232,17 @@ st.markdown(
     unsafe_allow_html=True,
 )
 # Drawn last means drawn on top, so rank 1 stays visible where circles overlap.
-points = top.sort_values("rank", ascending=False).assign(
-    colour=top["move"].map(COLOURS),
-    radius=12 + 14 * top["score"] / top["score"].max(),
-    label=top["rank"].astype(str),
+shown = top.head(budget)
+points = shown.sort_values("rank", ascending=False).assign(
+    colour=shown["move"].map(COLOURS),
+    radius=12 + 14 * shown["score"] / shown["score"].max(),
+    label=shown["rank"].astype(str),
 )
 deck = pdk.Deck(
     map_style=pdk.map_styles.LIGHT,
-    initial_view_state=pdk.ViewState(latitude=float(top["lat"].mean()),
-                                     longitude=float(top["lon"].mean()), zoom=10.3),
+    initial_view_state=pdk.ViewState(latitude=float(shown["lat"].mean()),
+                                     longitude=float(shown["lon"].mean()),
+                                     zoom=11.2 if plan and plan["constraints"]["region"] else 10.3),
     layers=[
         pdk.Layer("ScatterplotLayer", data=points, get_position=["lon", "lat"],
                   get_radius="radius", radius_units="'pixels'", get_fill_color="colour",
@@ -146,9 +259,9 @@ deck = pdk.Deck(
 st.pydeck_chart(deck, height=560)
 
 # Side by side
-agent_rank = dict(zip(top["location_key"], top["rank"]))
-overlap = m["overlap_with_baseline"]
-st.subheader(f"{overlap} of {len(top)} the same as count-only")
+agent_rank = dict(zip(shown["location_key"], shown["rank"]))
+overlap = plan["overlap"] if plan else m["overlap_with_baseline"]
+st.subheader(f"{overlap} of {len(shown)} the same as count-only")
 left, right = st.columns(2)
 with left:
     st.markdown("**Count only**")
@@ -159,16 +272,16 @@ with left:
             "Incidents": r["incidents"],
             "Agent rank": str(agent_rank.get(r["location_key"], "out")),
         }
-        for i, r in enumerate(result["baseline"]["top20"], start=1)
+        for i, r in enumerate(result["baseline"]["top20"][:budget], start=1)
     ]), hide_index=True)
 with right:
     st.markdown("**Ranked by harm**")
     st.table(pd.DataFrame({
-        "Rank": top["rank"],
-        "Location": top["name"],
-        "Incidents": top["incidents"],
-        "Ped or cyclist": top["pedestrian_or_cyclist"],
-        "Count rank": top["baseline_rank"],
+        "Rank": shown["rank"],
+        "Location": shown["name"],
+        "Incidents": shown["incidents"],
+        "Ped or cyclist": shown["pedestrian_or_cyclist"],
+        "Count rank": shown["baseline_rank"],
     }), hide_index=True)
 
 # Movers
@@ -197,3 +310,4 @@ else:
 
 st.divider()
 st.markdown(f"**{briefing.FOOTER}**")
+ss.last_result = result
