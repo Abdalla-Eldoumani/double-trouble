@@ -30,7 +30,8 @@ ABBREVIATIONS = {
     "ln": "lane", "pl": "place", "py": "parkway", "rd": "road", "st": "street",
     "tr": "trail", "wy": "way",
 }
-DIRECTION = re.compile(r"\b(?:north|south|east|west)bound\b")
+# "soutbound" is a typo in the feed; ramps and exits belong to the interchange they serve.
+DIRECTION = re.compile(r"\b(?:north|south?|east|west)bound\b|\b(?:exit|ramp)\b")
 CONNECTOR = re.compile(
     r"\s+(?:and|at|approaching|after|before|near|past|between|b/w|to|onto|on"
     r"|(?:north|south|east|west) of)\s+"
