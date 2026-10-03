@@ -73,6 +73,12 @@ def test_baseline_is_true_count_only_order(result):
     ("Westbound Stoney Trail after McKenzie Lake Boulevard SE", "mckenzie lake boulevard & stoney trail se"),
     ("17 Avenue and 36 Street SE", "17 avenue & 36 street se"),
     ("17 Avenue and 36 Street SW", "17 avenue & 36 street sw"),
+    ("Westbound 64 Avenue at Deerfoot NE", "64 avenue & deerfoot trail ne"),
+    ("Sarcee Trail and Stoney T NW", "sarcee trail & stoney trail nw"),
+    ("Southbound Deerfoot Trail and17 Avenue SE", "17 avenue & deerfoot trail se"),
+    ("Northbound 194 Avenue on ramp to Macleod Trail SE", "194 avenue & macleod trail se"),
+    ("39 Avenue NE &amp; 32 Street NE", "32 street & 39 avenue ne"),
+    ("Highland Drive and Centre Street N", "centre street & highland drive n"),
 ])
 def test_location_key_merges_one_intersection(name, key):
     assert location_key(name) == key
