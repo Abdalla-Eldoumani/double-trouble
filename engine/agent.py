@@ -19,7 +19,8 @@ TRAIN, TEST = ("2025-01-01", "2025-09-01"), ("2025-09-01", "2026-01-01")
 CHECK_TRAIN, CHECK_TEST = ("2025-01-01", "2025-07-01"), ("2025-07-01", "2026-01-01")
 
 GRID = [(s, t) for t in (0.0, 0.5, 1.0) for s in (0.0, 0.25, 0.5, 0.75, 1.0)]
-DEFAULT_WEIGHTS = {"w_severity": 0.0, "w_trend": 0.0, "exclude_provincial": False}
+# Deerfoot and Stoney are maintained by the province, not the City (docs/FACTS.md).
+DEFAULT_WEIGHTS = {"w_severity": 0.0, "w_trend": 0.0, "exclude_provincial": True}
 
 METRIC_NAME = "share of Sep-Dec severity points captured by a top 20 ranked on Jan-Aug"
 CHECK_METRIC_NAME = "share of Jul-Dec severity points captured by a top 20 ranked on Jan-Jun"
@@ -195,10 +196,12 @@ def main() -> None:
     ap.add_argument("--out", type=Path, default=Path("out/result.json"))
     ap.add_argument("--w-severity", type=float)
     ap.add_argument("--w-trend", type=float)
-    ap.add_argument("--exclude-provincial", action="store_true")
+    ap.add_argument("--exclude-provincial", action=argparse.BooleanOptionalAction, help="default: on")
     ap.add_argument("--no-tune", action="store_true", help="score the given weights instead of searching")
     a = ap.parse_args()
-    given = {"exclude_provincial": a.exclude_provincial}
+    given = {}
+    if a.exclude_provincial is not None:
+        given["exclude_provincial"] = a.exclude_provincial
     if a.w_severity is not None:
         given["w_severity"] = a.w_severity
     if a.w_trend is not None:
