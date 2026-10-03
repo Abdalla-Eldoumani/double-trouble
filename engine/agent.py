@@ -189,6 +189,7 @@ def run(weights: dict | None = None, tune: bool = True, constraints: dict | None
     movers = [
         {
             "location_key": key,
+            "name": places.at[key, "name"],
             "direction": "up" if pool.at[key, "rank"] < pool.at[key, "baseline_rank"] else "down",
             "from_rank": int(pool.at[key, "baseline_rank"]),
             "to_rank": int(pool.at[key, "rank"]),
@@ -208,7 +209,10 @@ def run(weights: dict | None = None, tune: bool = True, constraints: dict | None
         "dataset": {k: info[k] for k in ("source", "rows_loaded", "rows_dropped", "drop_reason", "rows_used")},
         "baseline": {
             "name": "count-only",
-            "top20": [{"location_key": k, "incidents": int(n)} for k, n in base["incidents"].head(TOP_N).items()],
+            "top20": [
+                {"location_key": k, "name": places.at[k, "name"], "incidents": int(n)}
+                for k, n in base["incidents"].head(TOP_N).items()
+            ],
         },
         "weights": w,
         "agent_iterations": iterations,
