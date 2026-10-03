@@ -207,8 +207,9 @@ if plan and plan["constraints"] != {"recent_weight": 1.0, "region": None, "budge
         f"**Planner settings:** top {c['budget']}"
         f"{', ' + c['region'] + ' only' if c['region'] else ', all of Calgary'}"
         f"{', July to December crashes count ' + format(c['recent_weight'], 'g') + ' times' if c['recent_weight'] != 1 else ''}. "
-        f"**Backtest** ({plan['metric_name']}): count-only {plan['backtest_baseline']:.3f}, "
-        f"these settings {plan['backtest_agent']:.3f}."
+        f"**Backtest** ({plan['metric_name']}): count-only {plan['backtest_baseline']:.2%}, "
+        f"these settings {plan['backtest_agent']:.2%} "
+        f"({100 * (plan['backtest_agent'] - plan['backtest_baseline']):+.2f} points)."
     )
 
 if "tuned" in ss:
