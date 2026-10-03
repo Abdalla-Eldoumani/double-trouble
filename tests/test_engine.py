@@ -58,6 +58,7 @@ def test_baseline_is_true_count_only_order(result):
     non_crash = first.str.contains(r"^\s*(?:stalled vehicle|traffic signal|power outage|road work|water main"
                                    r"|severe weather|hazardous road|lrt gates)|police|oversized load")
     counts = raw.loc[~non_crash, "incident_info"].map(location_key).value_counts()
+    counts = counts[~counts.index.str.contains("deerfoot|stoney")]
     base = result["baseline"]["top20"]
     assert [b["incidents"] for b in base] == counts.head(20).tolist()
     for b in base:
@@ -82,6 +83,17 @@ def test_rows_add_up(result):
     assert d["rows_loaded"] == len(pd.read_csv(CSV))
     assert d["rows_used"] + d["rows_dropped"] == d["rows_loaded"]
     assert d["rows_used"] == len(load()[0])
+
+
+def test_provincial_roads_excluded_by_default(result):
+    assert result["weights"]["exclude_provincial"] is True
+    keys = [r["location_key"] for r in result["top20"]] + [b["location_key"] for b in result["baseline"]["top20"]]
+    assert not any("deerfoot" in k or "stoney" in k for k in keys)
+
+
+def test_provincial_roads_can_be_included():
+    out = run({"exclude_provincial": False}, tune=False)
+    assert any("deerfoot" in r["location_key"] for r in out["top20"])
 
 
 def test_no_tune_returns_given_weights():
