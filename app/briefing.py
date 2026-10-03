@@ -18,7 +18,9 @@ def build_script(result):
     data = result["dataset"]
     lines = [
         "Morning safety briefing.",
-        f"{data['rows_used']:,} reported crashes, ranked by harm rather than by count.",
+        f"{data['rows_used']:,} reported crashes, " + (
+            "ranked by harm rather than by count." if any(result["weights"][k] for k in ("w_severity", "w_trend"))
+            else "ranked by crash count."),
         "The top five:",
     ]
     for r in sorted(result["top20"], key=lambda r: r["rank"])[:5]:
@@ -47,6 +49,17 @@ def api_key():
     except Exception:
         # No secrets file is a normal state locally; the caller hides the button.
         return None
+
+
+STT_MODEL_ID = "scribe_v2"
+
+
+def transcribe(audio, key):
+    """Speech to text for a recorded planner request."""
+    from elevenlabs.client import ElevenLabs
+
+    client = ElevenLabs(api_key=key)
+    return client.speech_to_text.convert(file=audio, model_id=STT_MODEL_ID).text.strip()
 
 
 @st.cache_data(show_spinner="Generating audio...")
