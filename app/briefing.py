@@ -9,7 +9,8 @@ QUADRANTS = {"nw", "ne", "sw", "se"}
 
 
 def location_names(result):
-    names = {r["location_key"]: r["name"] for r in result["baseline"]["top20"] if r.get("name")}
+    names = {r["location_key"]: r["name"]
+             for r in result["baseline"]["top20"] + result["movers"] if r.get("name")}
     names.update({r["location_key"]: r["name"] for r in result["top20"]})
     return names
 
