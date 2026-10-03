@@ -44,7 +44,12 @@ Every claim about the world that the engine, app, README or pitch relies on. One
 
 - Source: Open Calgary, Traffic Incidents. https://data.calgary.ca/Transportation-Transit/Traffic-Incidents/35ra-9556
 - Checked: 2026-10-03
-- Supporting lines: "Data Provided By The City of Calgary", "Dataset Owner Calgary Open Data", "License: See Terms of Use"
+- Supporting lines: "Data Provided By The City of Calgary", "Dataset Owner Calgary Open Data", "License: See Terms of Use", "Business Unit | Mobility"
+- What the feed is, in the City's words (about_data tab, https://data.calgary.ca/Transportation-Transit/Traffic-Incidents/35ra-9556/about_data):
+  - "This is an unofficial archive of traffic incidents within Calgary."
+  - "Traffic incidents are traffic disruptions affecting traffic flow, such as traffic signal issues, hazardous road conditions, stalled vehicles, and unverified, unreported traffic collisions."
+  - "This data is based off unrecorded imagery where traffic cameras are present. There may be gaps in the data due to system or script malfunction."
+- Consequence: results are incidents seen on traffic cameras, not confirmed collisions, and places without cameras are likely under-counted. Say so wherever results are shown.
 
 ### 6. Open Calgary data is licensed under the Open Government Licence - City of Calgary, version 2.1, which requires an attribution statement
 
