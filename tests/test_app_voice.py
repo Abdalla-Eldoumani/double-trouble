@@ -117,7 +117,7 @@ def test_transcribe_sends_audio_to_scribe(monkeypatch):
         recording.setnchannels(1)
         recording.setsampwidth(2)
         recording.setframerate(16000)
-        recording.writeframes(b"\x01\x00" * 3200)
+        recording.writeframes(b"\x00\x10" * 3200)  # audible level; a silent clip is refused before the API call
     audio = ("request.wav", data.getvalue(), "audio/wav")
     assert briefing.transcribe(audio, "test-key-not-real") == "only show northwest Calgary"
     assert sent == [{"file": audio, "model_id": briefing.STT_MODEL_ID, "language_code": "eng",
