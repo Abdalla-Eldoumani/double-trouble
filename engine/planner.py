@@ -12,6 +12,7 @@ NUMBER_WORDS = {
     "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8,
     "nine": 9, "ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14,
     "fifteen": 15, "sixteen": 16, "seventeen": 17, "eighteen": 18, "nineteen": 19, "twenty": 20,
+    "thirty": 30, "forty": 40, "fifty": 50,
 }
 MULTIPLIERS = {
     "twice": 2, "double": 2, "two times": 2, "2x": 2, "2 times": 2,
@@ -23,17 +24,30 @@ REGION_PATTERNS = {
     code: rf"\b(?:{name[:5]}[\s-]?{name[5:]}|{code.lower()})\b" for code, name in REGION_NAMES.items()
 }
 CITYWIDE = r"\b(?:all of calgary|whole city|entire city|city[\s-]?wide|every quadrant|all quadrants|everywhere)\b"
+# A number followed by a street word is an address ("look at 16 Avenue"), not a budget.
+NOT_STREET = r"(?!\s*(?:st|nd|rd|th)?\s*(?:avenue|ave|street|st|trail|drive|road|boulevard|blvd|way|gate)\b)"
 BUDGET = (
-    r"\b(?:top|only|just|budget (?:of|for)|investigate|visit|fix|afford|study|handle|look at|pick)"
-    r"\s+(?:the\s+)?(?:top\s+)?(\d{1,2}|" + "|".join(NUMBER_WORDS) + r")\b"
-    r"|\b(\d{1,2}|" + "|".join(NUMBER_WORDS) + r")\s+(?:intersections|locations|sites|spots|places)\b"
+    r"\b(?:top|only|just|budget (?:of|for|is)|investigate|visit|fix|afford|study|handle|look at|pick)"
+    r"\s+(?:the\s+)?(?:top\s+)?(\d{1,3}|" + "|".join(NUMBER_WORDS) + r")\b" + NOT_STREET
+    + r"|\b(\d{1,3}|" + "|".join(NUMBER_WORDS) + r")\s+(?:intersections|locations|sites|spots|places)\b"
 )
+TIMES = r"\b(\d+(?:\.\d+)?)\s*(?:x|times)\b|\bx\s*(\d+(?:\.\d+)?)\b"
 SEVERITY_ON = r"\b(?:pedestrian|cyclist|vulnerable|severity|severe|harm|injur\w*|serious)"
-SEVERITY_OFF = r"\b(?:count only|just count|raw count|ignore severity|crash count only|only the count)\b"
-PROVINCIAL_IN = r"\b(?:include|add|show|with)\s+(?:the\s+)?(?:provincial|highways?|deerfoot|stoney)"
+SEVERITY_OFF = (
+    r"\b(?:count only|just count|raw count|crash count only|only the count)\b"
+    r"|\b(?:ignore|without|no|not|don't|do not|stop)\b(?:\s+\w+){0,2}\s+(?:severity|harm)"
+)
+PROVINCIAL_IN = (
+    r"\b(?:include|add|show|with|what about)\s+(?:the\s+)?(?:provincial|highways?|deerfoot|stoney)"
+    r"|\b(?:don't|do not|stop|no longer|not)\s+(?:exclud|hid|drop|remov|leav)\w*\s+(?:out\s+)?(?:the\s+)?"
+    r"(?:provincial|highways?|deerfoot|stoney)"
+)
 PROVINCIAL_OUT = r"\b(?:exclude|without|drop|remove|hide|no)\s+(?:the\s+)?(?:provincial|highways?|deerfoot|stoney)|city roads only"
-TUNE = r"\b(?:tune|optimi[sz]e|best weights|you (?:choose|pick|decide))\b"
-RESET = r"\b(?:reset|start over|clear (?:everything|all|settings))\b"
+TUNE = (
+    r"\b(?:tune|optimi[sz]e|best weights|find the best|(?:you|agent|it|engine) (?:choose|pick|decide)s?"
+    r"|let (?:the )?(?:agent|engine|it) (?:choose|pick|decide))\b"
+)
+RESET = r"\b(?:reset|start (?:over|again)|back to (?:the )?defaults?|default settings|clear (?:everything|all|settings))\b"
 
 
 def _number(token: str) -> int:
@@ -57,16 +71,20 @@ def parse(text: str) -> dict:
     if re.search(r"\brecen(?:t|cy)|\blately\b|\blatest\b", t):
         if re.search(r"\b(?:ignore|stop|no longer|don't|do not)\b[^.]*\brecen", t) or "equally" in t:
             constraints["recent_weight"] = 1.0
-            heard.append("recent crashes count the same as older ones")
+            heard.append("recent incidents count the same as older ones")
         else:
-            factor = next((f for phrase, f in MULTIPLIERS.items() if re.search(rf"\b{re.escape(phrase)}\b", t)), None)
-            if factor is None and re.search(r"\b(?:prioriti[sz]e|weight|favou?r|emphasi[sz]e|focus)\w*\b", t):
+            m = re.search(TIMES, t)
+            factor = float(m.group(1) or m.group(2)) if m else None
+            if factor is None:
+                factor = next((f for phrase, f in MULTIPLIERS.items() if re.search(rf"\b{re.escape(phrase)}\b", t)), None)
+            if factor is None and re.search(r"\b(?:prioriti[sz]e|weight|favou?r|emphasi[sz]e|focus|more|higher)\w*\b", t):
                 factor = 2
             if factor is not None:
-                factor = min(factor, MAX_RECENT_WEIGHT)
+                asked, factor = factor, max(1.0, min(factor, MAX_RECENT_WEIGHT))
                 constraints["recent_weight"] = float(factor)
                 times = "twice" if factor == 2 else f"{factor:g} times"
-                heard.append(f"crashes from July to December count {times}")
+                capped = f" (asked for {asked:g}, the most it allows)" if asked > MAX_RECENT_WEIGHT else ""
+                heard.append(f"incidents from July to December count {times}{capped}")
 
     if re.search(CITYWIDE, t):
         constraints["region"] = None
@@ -84,21 +102,22 @@ def parse(text: str) -> dict:
         asked = _number(m.group(1) or m.group(2))
         budget = max(1, min(asked, TOP_N))
         constraints["budget"] = budget
-        heard.append(f"a budget of {budget} intersections" + (f" (the most it ranks is {TOP_N})" if asked > TOP_N else ""))
+        plural = "location" if budget == 1 else "locations"
+        heard.append(f"a budget of {budget} {plural}" + (f" (the most it ranks is {TOP_N})" if asked > TOP_N else ""))
 
     if re.search(SEVERITY_OFF, t):
         weights["w_severity"] = 0.0
-        heard.append("rank by crash count only")
+        heard.append("rank by incident count only")
     elif re.search(SEVERITY_ON, t):
         weights["w_severity"] = 1.0
-        heard.append("rank by harm, so pedestrian, cyclist and multi-vehicle crashes weigh more")
+        heard.append("rank by harm score, so incidents with a pedestrian, cyclist or several vehicles weigh more")
 
-    if re.search(PROVINCIAL_OUT, t):
-        weights["exclude_provincial"] = True
-        heard.append("City roads only, Deerfoot and Stoney left out")
-    elif re.search(PROVINCIAL_IN, t):
+    if re.search(PROVINCIAL_IN, t):
         weights["exclude_provincial"] = False
         heard.append("Deerfoot and Stoney included")
+    elif re.search(PROVINCIAL_OUT, t):
+        weights["exclude_provincial"] = True
+        heard.append("Deerfoot and Stoney Trail locations left out")
 
     if re.search(TUNE, t):
         tune = True
@@ -162,7 +181,8 @@ def explain(current: dict, comparison: dict, heard: list[str]) -> str:
         detail = f"{lead['incidents']} incidents"
         if lead["pedestrian_or_cyclist"]:
             detail += f", {lead['pedestrian_or_cyclist']} with a pedestrian or cyclist"
-        parts.append(f"Top of the {n} for {where}: {display(lead['location_key'])}, {detail}.")
+        head = "Top pick" if n == 1 else f"Top of the {n}"
+        parts.append(f"{head} for {where}: {lead['name']}, {detail}.")
 
     if not comparison["first"]:
         before = comparison["previous_constraints"]
@@ -180,11 +200,11 @@ def explain(current: dict, comparison: dict, heard: list[str]) -> str:
 
     gap = plan["points_agent"] - plan["points_baseline"]
     if gap > 0:
-        verdict = f"{gap} more than a plain crash count"
+        verdict = f"{gap} more than a plain incident count"
     elif gap < 0:
-        verdict = f"{-gap} fewer than a plain crash count"
+        verdict = f"{-gap} fewer than a plain incident count"
     else:
-        verdict = "the same as a plain crash count"
+        verdict = "the same as a plain incident count"
     parts.append(
         f"Backtest: ranked on January to August, this top {n} caught {plan['points_agent']} of "
         f"{plan['points_total']} September to December severity points, {verdict}."
