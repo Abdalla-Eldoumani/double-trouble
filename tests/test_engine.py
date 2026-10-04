@@ -186,3 +186,13 @@ def test_tuning_uses_the_planner_budget():
     out = run(tune=True, constraints={"budget": 5})
     assert out["plan"]["points_agent"] >= out["plan"]["points_baseline"]
     assert all(it["iteration"] == i for i, it in enumerate(out["agent_iterations"]))
+
+
+def test_movers_and_top20_carry_their_own_counts(result):
+    from engine.score import add_points, signals
+
+    df, _ = load()
+    observed = signals(add_points(df), "2025-01-01", "2026-01-01")
+    for row in result["top20"] + result["movers"]:
+        for field in ("incidents", "pedestrian_or_cyclist", "multi_vehicle", "multiple_lanes", "early", "late"):
+            assert row[field] == observed.at[row["location_key"], field]
