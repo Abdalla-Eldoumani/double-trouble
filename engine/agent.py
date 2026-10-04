@@ -90,7 +90,9 @@ def backtest(
         caught = float(points.reindex(above, fill_value=0).sum()
                        + (n - len(above)) * points.reindex(tied, fill_value=0).mean())
     caught = round(caught, 1)
-    return caught / total, int(caught) if caught.is_integer() else caught, total
+    # An area with no later incidents (a small quadrant, a narrow window) scores zero, not a crash.
+    share = caught / total if total else 0.0
+    return share, int(caught) if caught.is_integer() else caught, total
 
 
 def _weights(s: float, t: float, exclude: bool) -> dict:
@@ -212,6 +214,10 @@ def run(weights: dict | None = None, tune: bool = True, constraints: dict | None
             "incidents": int(r["incidents"]),
             "severity_points": int(r["severity_points"]),
             "pedestrian_or_cyclist": int(r["pedestrian_or_cyclist"]),
+            "multi_vehicle": int(r["multi_vehicle"]),
+            "multiple_lanes": int(r["multiple_lanes"]),
+            "early": int(r["early"]),
+            "late": int(r["late"]),
             "in_baseline_top20": key in base_top,
             "reason": describe(r),
         })
@@ -219,7 +225,7 @@ def run(weights: dict | None = None, tune: bool = True, constraints: dict | None
     # Movers come from either top 20, so a location that fell off the list can be explained too.
     pool = final.loc[final.index.isin(top.index) | final.index.isin(base_top)]
     change = (pool["baseline_rank"] - pool["rank"]).abs()
-    avg = pool["severity_points"].sum() / pool["incidents"].sum()
+    avg = pool["severity_points"].sum() / pool["incidents"].sum() if pool["incidents"].sum() else 0.0
     movers = [
         {
             "location_key": key,
@@ -228,6 +234,13 @@ def run(weights: dict | None = None, tune: bool = True, constraints: dict | None
             "from_rank": int(pool.at[key, "baseline_rank"]),
             "to_rank": int(pool.at[key, "rank"]),
             "reason": mover_reason(pool.loc[key], avg, w),
+            # Optional counts, so a location that fell off the list can be explained too.
+            "incidents": int(pool.at[key, "incidents"]),
+            "pedestrian_or_cyclist": int(pool.at[key, "pedestrian_or_cyclist"]),
+            "multi_vehicle": int(pool.at[key, "multi_vehicle"]),
+            "multiple_lanes": int(pool.at[key, "multiple_lanes"]),
+            "early": int(pool.at[key, "early"]),
+            "late": int(pool.at[key, "late"]),
         }
         for key in change[change > 0].sort_values(ascending=False, kind="stable").index[:3]
     ]
