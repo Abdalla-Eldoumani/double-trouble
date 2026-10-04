@@ -182,6 +182,7 @@ region = plan["constraints"]["region"] if plan else None
 names = briefing.location_names(result)
 st.markdown(ui.hero(TITLE, LEDE, result["dataset"]), unsafe_allow_html=True)
 st.markdown(ui.figures(result), unsafe_allow_html=True)
+st.html(ui.recommendation_link())
 
 controls_col, ask_col = st.columns([1, 1], gap="large")
 with controls_col, st.container(key="controls"):

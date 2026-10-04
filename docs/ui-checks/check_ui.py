@@ -4,7 +4,7 @@ Start the app, then pass its URL and optionally an output directory. Playwright 
 utility only and is intentionally absent from the application's requirements.
 """
 from pathlib import Path
-from playwright.sync_api import sync_playwright, expect, Error as PlaywrightError
+from playwright.sync_api import sync_playwright, expect
 import json
 import sys
 
@@ -31,9 +31,6 @@ def map_hover(page,filename):
 def area(page,value):
     page.get_by_role('combobox',name='Area',exact=True).scroll_into_view_if_needed()
     page.get_by_role('group').filter(has=page.get_by_role('combobox',name='Area',exact=True)).get_by_role('button',name='Open',exact=True).click()
-    if ':8502' in page.url:
-        page.screenshot(path=str(OUT/'running-8502-area-dropdown.png'))
-        print('Existing area options:',page.get_by_role('option').all_text_contents(),flush=True)
     page.get_by_role('option',name=value,exact=True).click()
     idle(page)
     expect(page.get_by_role('combobox',name='Area',exact=True)).to_have_value(value)
@@ -61,6 +58,10 @@ with sync_playwright() as p:
     assert page.locator('.hero img').evaluate_all('(es)=>es.every(e=>e.complete&&e.naturalWidth>0)')
     assert page.locator('.hero img').evaluate_all('(es)=>es.every(e=>e.alt===""&&e.getAttribute("aria-hidden")==="true")')
     page.screenshot(path=str(OUT/'light-desktop.png'))
+    page.get_by_role('link',name='View current recommendations ↓',exact=True).click()
+    heading_box=page.get_by_role('heading',name='Recommendation summary',exact=True).bounding_box()
+    assert 0 <= heading_box['y'] < 150,heading_box
+    page.screenshot(path=str(OUT/'summary-jump.png'))
     def summary_readable():
         panel=page.locator('.recommendation-summary')
         expect(panel).to_have_count(1)
@@ -91,7 +92,7 @@ with sync_playwright() as p:
         lede=document.querySelector('.lede').getBoundingClientRect(),toggle=document.querySelector('input[role="switch"]').closest('label').getBoundingClientRect();
         return {width:r.width,height:r.height,opacity:getComputedStyle(e).opacity,loaded:e.complete&&e.naturalWidth>0,
             separateFromText:r.x>=title.right&&r.x>=lede.right,belowToggle:r.y>toggle.bottom};}''')
-    assert equipment['loaded'] and equipment['width']>=210 and equipment['opacity']=='1'
+    assert equipment['loaded'] and equipment['width']>=230 and equipment['opacity']=='1'
     assert equipment['separateFromText'] and equipment['belowToggle'],equipment
     road=page.get_by_test_id('stMainBlockContainer').evaluate('''e=>{const s=getComputedStyle(e,'::before');
         return {position:s.position,opacity:s.opacity,repeat:s.backgroundRepeat,mask:s.maskImage,composite:s.maskComposite,
@@ -225,57 +226,10 @@ with sync_playwright() as p:
     assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')
     expect(page.get_by_role('combobox',name='Area',exact=True)).to_have_value('All Calgary')
     results = {'visual_checks':'passed','desktop':[1440,1050],'mobile':[390,844],
-        'server':URL,'equipment':equipment,'road':road,'summary_readability':{'light':light_readability,'dark':dark_readability,'light_phone':light_phone_readability,'dark_phone':dark_phone_readability},
+        'server':URL,'summary_jump_heading_y':heading_box['y'],'equipment':equipment,'road':road,'summary_readability':{'light':light_readability,'dark':dark_readability,'light_phone':light_phone_readability,'dark_phone':dark_phone_readability},
         'csv_identical_across_themes':dark_csv==light_csv,'download_bytes':len(dark_csv),
         'captions':{'light':light_caption,'dark':dark_caption},'page_errors':failures}
     (OUT/'results.json').write_text(json.dumps(results,indent=2)+'\n')
-    # Compare against the already-running user server in a new browser session.
-    # Do not stop it, reconfigure it, or change a user's existing browser session.
-    if URL=='http://127.0.0.1:8504':
-        existing=browser.new_page(viewport={'width':1440,'height':1050})
-        try:
-            existing.goto('http://localhost:8502',timeout=15000)
-        except PlaywrightError as exc:
-            results['existing_server']={'url':'http://localhost:8502','status':'unavailable',
-                'navigation_error':str(exc),'controls_verification':'incomplete',
-                'earlier_observation':'Updated summary container and 218px full-opacity equipment were seen and captured before this server stopped accepting connections.'}
-            (OUT/'results.json').write_text(json.dumps(results,indent=2)+'\n')
-            print(json.dumps({'verification_server':URL,'visual_checks':results['visual_checks'],
-                'existing_server':results['existing_server'],'page_errors':failures},indent=2))
-            assert not failures
-            browser.close()
-            sys.exit(0)
-        existing.get_by_role('heading',name='Recommendation summary').wait_for(timeout=30000)
-        idle(existing)
-        notice=existing.get_by_role('button',name="Don't show again",exact=True)
-        if notice.count():
-            notice.click()
-        expect(existing.locator('.st-key-recommendation_summary')).to_have_count(1)
-        expect(existing.locator('.recommendation-summary')).to_have_count(1)
-        expect(existing.locator('.recommendation-summary')).to_contain_text('20 locations recommended in All Calgary')
-        existing.screenshot(path=str(OUT/'running-8502-light-header.png'))
-        existing_equipment=existing.locator('.hero-equipment').evaluate('e=>({width:e.getBoundingClientRect().width,cssWidth:getComputedStyle(e).width,opacity:getComputedStyle(e).opacity,position:getComputedStyle(e).position,parent:e.parentElement.className})')
-        print('Existing server equipment:',json.dumps(existing_equipment),flush=True)
-        assert existing_equipment['width']>=210,existing_equipment
-        existing.locator('.recommendation-summary').scroll_into_view_if_needed()
-        existing.screenshot(path=str(OUT/'running-8502-light-summary.png'))
-        existing.locator('.st-key-controls').scroll_into_view_if_needed()
-        area(existing,'Northwest')
-        expect(existing.locator('.recommendation-summary')).to_contain_text('Northwest Calgary')
-        ask(existing,'Top 10 across the whole city.')
-        expect(existing.get_by_role('combobox',name='Area',exact=True)).to_have_value('All Calgary')
-        applied=existing.locator('.recommendation-summary').inner_text()
-        existing.get_by_role('switch',name='Dark mode').set_checked(True)
-        idle(existing)
-        assert existing.locator('.recommendation-summary').inner_text()==applied
-        existing.locator('.mast').scroll_into_view_if_needed()
-        existing.screenshot(path=str(OUT/'running-8502-dark-header.png'))
-        existing.locator('.recommendation-summary').scroll_into_view_if_needed()
-        existing.screenshot(path=str(OUT/'running-8502-dark-summary.png'))
-        results['existing_server']={'url':existing.url,'updated_summary_container':True,
-            'equipment_width':218,'area_planner_and_theme_checked':True,'summary':applied}
-        existing.close()
-    (OUT/'results.json').write_text(json.dumps(results,indent=2)+'\n')
-    print(json.dumps(results,indent=2))
+    print(json.dumps({key:results[key] for key in ('visual_checks','server','summary_jump_heading_y','equipment','csv_identical_across_themes','page_errors')},indent=2))
     assert not failures
     browser.close()

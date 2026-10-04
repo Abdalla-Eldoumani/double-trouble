@@ -1,16 +1,18 @@
 """Capture the existing user servers before the focused UI correction."""
 import json
+import sys
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 
-OUT = Path(__file__).resolve().parent / "correction"
-OUT.mkdir(exist_ok=True)
+OUT = Path(sys.argv[2]) if len(sys.argv) > 2 else Path(__file__).resolve().parent / "correction"
+OUT.mkdir(parents=True, exist_ok=True)
+PORTS = [int(sys.argv[1])] if len(sys.argv) > 1 else [8501, 8502]
 
 with sync_playwright() as p:
     browser = p.chromium.launch(channel="chrome", headless=True)
     page = browser.new_page(viewport={"width": 1440, "height": 1050})
     results = {}
-    for port in (8501, 8502):
+    for port in PORTS:
         page = browser.new_page(viewport={"width": 1440, "height": 1050})
         print(f"Inspecting {port}", flush=True)
         try:

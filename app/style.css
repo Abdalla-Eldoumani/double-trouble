@@ -27,7 +27,7 @@ header[data-testid="stHeader"], [data-testid="stToolbar"], [data-testid="stDecor
 .mast .muted { color: var(--ink-soft); }
 .mast .dot { display: inline-block; width: .5rem; height: .5rem; border-radius: 50%;
   background: var(--signal); margin-right: .5rem; }
-.hero { display: grid; grid-template-columns: minmax(0, 1fr) 218px; gap: 2rem;
+.hero { display: grid; grid-template-columns: minmax(0, 1fr) 240px; gap: 2rem;
   align-items: center; padding: 2rem 0; }
 .hero-copy { min-width: 0; }
 .hero:not(:has(.hero-equipment)) { grid-template-columns: minmax(0, 1fr); }
@@ -35,7 +35,7 @@ header[data-testid="stHeader"], [data-testid="stToolbar"], [data-testid="stDecor
   max-width: 28ch; color: var(--ink); text-wrap: balance; }
 .title em { font-style: normal; color: var(--signal); }
 .lede { margin-top: 1.2rem; font: 400 1.06rem/1.6 var(--sans); color: var(--ink-soft); max-width: 80ch; }
-.dt.hero img.hero-equipment { display: block; width: 218px; height: 218px; max-width: 100%;
+.dt.hero img.hero-equipment { display: block; width: 240px; height: 240px; max-width: 100%;
   object-fit: cover; object-position: 45% 40%; border-radius: 6px; border: 1px solid var(--rule);
   filter: var(--equipment-filter); pointer-events: none; }
 .figures { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; margin: .3rem 0 1rem; }
@@ -43,6 +43,10 @@ header[data-testid="stHeader"], [data-testid="stToolbar"], [data-testid="stDecor
 .fig-label { font: 600 .92rem/1.4 var(--sans); color: var(--ink-soft); }
 .fig-value { margin: .5rem 0; font: 700 2.6rem/1 var(--sans); color: var(--ink); font-variant-numeric: tabular-nums; }
 .fig-note { font: 400 .88rem/1.5 var(--sans); color: var(--ink-soft); }
+.recommendation-link { font: 600 .9rem/1.5 var(--sans); }
+.recommendation-link a { text-underline-offset: .2em; }
+.recommendation-link a:focus-visible { outline: 2px solid var(--signal); outline-offset: 4px; }
+#recommendation-summary { scroll-margin-top: 1rem; }
 .sec { padding-top: 1rem; margin-top: 2rem; border-top: 1px solid var(--rule); }
 .sec-title { font: 650 1.8rem/1.2 var(--sans); letter-spacing: -.02em; color: var(--ink); }
 .sec-note { margin-top: .5rem; font: 400 1rem/1.5 var(--sans); color: var(--ink-soft); }

@@ -138,7 +138,7 @@ def recommendation_summary(result):
     items = "".join(f'<li><b>{esc(r["name"])}</b> — {esc(summary_reason(r, result))}</li>' for r in rows[:3])
     body = f'<ul>{items}</ul>' if rows else '<p>No locations qualify for the applied area and road scope.</p>'
     return ('<div class="dt recommendation-summary" role="region" aria-label="Recommendation summary">'
-            '<h3>Recommendation summary</h3>'
+            '<h3 id="recommendation-summary">Recommendation summary</h3>'
             f'<p>{esc(overview)}</p><p>Applied priorities: {esc(planning.priority_description(settings))}.</p>'
             f'{body}<div class="summary-note">Location counts cover January–December 2025. '
             'The crash total above covers the full cleaned dataset, before area and road filters.</div></div>')
@@ -340,6 +340,12 @@ def figures(result):
         out.append(f'<div class="fig"><div class="fig-label">{esc(label)}</div>'
                    f'<div class="fig-value">{value}</div><div class="fig-note">{esc(note)}</div></div>')
     return '<div class="dt figures">' + "".join(out) + "</div>"
+
+
+def recommendation_link():
+    """Make the single, below-controls summary discoverable from the opening view."""
+    return ('<div class="dt recommendation-link">'
+            '<a href="#recommendation-summary">View current recommendations ↓</a></div>')
 
 
 def section(number, title, note=""):

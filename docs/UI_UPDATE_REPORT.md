@@ -1,77 +1,71 @@
 # Focused UI correction and actual verification
 
-Updated 2026-10-04 in `/Users/ibrahimahmed/double-trouble`, based on checkout `b2f83c4` plus the existing uncommitted UI changes. Python 3.13.2; Streamlit 1.65.0. The code and previous report were inspected before editing. Existing changes were retained. No commit, push, merge, deployment, or ElevenLabs configuration was performed.
+Updated 2026-10-04 against checkout `f87b638` in `/Users/ibrahimahmed/double-trouble`. The code and existing report were inspected before editing. Python 3.13.2; Streamlit 1.65.0. This report supersedes the earlier report's server-status statements; older screenshots in `ui-checks/correction/` are historical.
 
-## Summary investigation: confirmed findings and limits
+## Summary investigation: confirmed findings and uncertainty
 
-The previous report verified a separate server on 8502 and left the then-existing server on 8501 untouched. This correction inspected the currently running processes and the actual pages instead of inferring visibility from AppTest.
+The restarted, user-facing process is PID **2129**, running this checkout's `.venv/bin/streamlit run app/main.py`, with working directory `/Users/ibrahimahmed/double-trouble`, listening on **8501**. Its health endpoint returned HTTP 200 and `ok`. It was not stopped or reconfigured.
 
-| Server | Process and checkout | Actual observation |
+A separate Chrome session inspected `http://localhost:8501` **before changes**. It rendered exactly one Recommendation summary, with the current area/count, road exclusions, applied priorities, and three leading locations with factual counts. At 1440 × 1050, the panel began at approximately **1309 pixels** below the document top, outside the initial viewport. After scrolling, its heading and contents were visibly readable directly above export and the map.
+
+The panel was 291 pixels high, with `display: block`, `position: static`, automatic height, visible overflow, visibility `visible`, opacity 1, dark text on white, and no hiding ancestor. Screenshot inspection showed no covering element. Evidence: [before-change measurements](ui-checks/current/before.json), [opening page](ui-checks/current/before-8501-header.png), and [summary after scrolling](ui-checks/current/before-8501-summary.png).
+
+**Confirmed:** the current summary was below the opening viewport, making it easy to miss. **Not established:** the cause of the user's earlier missing-summary experience. No hidden-summary CSS fault or wrong-checkout condition was reproduced in the restarted 8501 process. The previous report's unresponsive servers and stale-module observations are historical findings, not proven explanations for this current experience.
+
+## Focused changes and preserved behavior
+
+- Added a small **View current recommendations ↓** link immediately after the three figures. It targets the existing summary heading, brings it near the top of the viewport, and does not duplicate the summary or its contents. The target has a modest scroll margin and the link has a keyboard-focus outline.
+- Kept exactly one **Recommendation summary** in its normal-flow, opaque themed panel above export, map, and shortlist. The existing result-derived contents and explicit empty state remain intact. No expander, fixed positioning, forced scrolling on reruns, or competing summary was added.
+- Enlarged the desktop equipment photograph from **218 × 218 to 240 × 240**. Its separate header grid column keeps it clear of the title, description, and theme toggle. The existing crop prominently shows the vest and helmet, at full opacity; its subtle border and dark-theme brightness adjustment remain. Tablet size stays 160 × 160 and it is hidden at 640 pixels and below.
+- Preserved the title, description, layout, colors, controls, typed planner, dark-mode state, map, CSV export, ranking engine, scoring, exclusions, tuning, and reset behavior. ElevenLabs remains deferred and gated. No planning, engine, export, speech, or application dependency files changed.
+- Updated browser utilities to inspect an explicitly selected server and store new evidence separately. Removed a hardcoded comparison with the obsolete 8502 server so future checks cannot silently attribute old observations to the current app.
+
+## Real photographs and background
+
+Both existing local JPEGs were opened and visually inspected. Their bytes are unchanged. No replacement imagery was sourced, generated, or hotlinked.
+
+| Asset | Current treatment |
+| --- | --- |
+| `safety-vest-hardhat-life-of-pix.jpg` — Life Of Pix / Pexels, Pexels License | Existing proportional crop reused at 240 pixels on desktop, 160 on tablets, hidden on phones. Full opacity, separate grid column, subtle border, brightness 0.88 in dark mode. |
+| `road-intersection-frak-lopez.jpg` — Frak Lopez / Unsplash, Unsplash License | The existing intersection photograph is suitable and its existing page-edge background treatment is retained: one local image with cover cropping, opacity 0.12 light / 0.10 dark, theme-colored overlays, and intersecting horizontal/vertical masks. Absolute positioning inside the scrolling document, no repetition, stretching, animation, fixed-position effect, or pointer interception. Reduced on tablets and disabled at 640 pixels and below. |
+
+Desktop screenshots show faint road markings in open edge space. Opaque figures and planning panels cover the image; the summary and map remain clear of it. Dark mode has no bright background patches. [Attribution](../app/assets/ATTRIBUTION.md) records each creator, source, license, and adjustments, including the new equipment display size. Existing in-app attribution remains.
+
+## Actual browser verification
+
+The in-app browser skill was attempted first; initialization failed with a missing `sandboxPolicy` field. A temporary Playwright utility in `/tmp/double-trouble-browser-tools` then drove an isolated headless instance of installed Google Chrome. These results include actual browser interactions and opened screenshot inspections, not only AppTests. No existing user browser session was changed.
+
+| Server inspected | Checkout / process | Result |
 | --- | --- | --- |
-| `http://localhost:8501` | Existing PID 25090, `python -m streamlit run app/main.py`, working directory `/Users/ibrahimahmed/double-trouble` | TCP connections accepted, but the health endpoint returned zero bytes and timed out after 8 seconds. Chrome navigation also timed out (both load and DOM-content waits). No usable page was delivered; its summary visibility could not be inspected. |
-| `http://localhost:8502` | Existing PID 33245, this checkout's `.venv/bin/streamlit run app/main.py`, same working directory | The pre-change page rendered one readable summary above export and the map. Subsequently, it picked up the modified main script but retained old imported UI code and CSS. This mismatch was reproduced in Chrome, and the freshness fix produced the updated summary and photo. Before its remaining control comparison could finish, the server stopped accepting connections (`ERR_CONNECTION_REFUSED`). |
-| `http://127.0.0.1:8504` | Verification PID 34663, started for this correction using `.venv/bin/python -m streamlit run /Users/ibrahimahmed/double-trouble/app/main.py --server.port 8504 --server.address 127.0.0.1 --server.headless true` | Fresh process from the same checkout rendered the corrected presentation and was exercised in Chrome. Left running for review. |
+| `http://localhost:8501` | Existing user-facing PID 2129; this checkout | Full browser audit passed after changes. The long-lived server picked up the current summary anchor and 240-pixel photograph. |
+| `http://localhost:8504` | Fresh verification PID 3653, started with `.venv/bin/python -m streamlit run /Users/ibrahimahmed/double-trouble/app/main.py --server.port 8504 --server.address 127.0.0.1 --server.headless true`; same checkout | Same full browser audit passed. No visible summary, photo-size, theme, or workflow difference found. |
 
-The pre-change summary on 8502 contained the current area, actual count, applied priorities, road scope, and all three leading location names/reasons. Its initial top was about 1309 pixels below the page top at 1440 × 1050, below the initial viewport. After scrolling, it was visibly readable. It measured about 298 pixels high, with `display: block`, `position: static`, `visibility: visible`, opacity 1, visible overflow, white background, and dark text. Its ancestors did not hide it. Screenshots show its location immediately above export/map/shortlist and no covering element after scrolling. See [pre-change observations](ui-checks/correction/before.json) and [pre-change summary screenshot](ui-checks/correction/before-8502-summary.png).
+Both servers were checked at **1440 × 1050** and **390 × 844**:
 
-**Confirmed version mismatch:** after the edits, 8502 rendered the new keyed summary container from `main.py`, yet the equipment photo still measured 120 pixels with opacity 0.78 and absolute positioning. The fresh 8504 page showed 218 pixels, opacity 1, and static positioning. Thus changing the main script did not ensure that the long-lived process refreshed the imported presentation module. A timestamp check now reloads only `app.ui` when its source changes. CSS is read from the local stylesheet on every theme/render rerun instead of being captured at import time. The existing 8502 process then rendered the current photograph at 218 pixels, full opacity, and static positioning without restarting it.
+- One summary heading and its actual contents, before export/map/shortlist. The new link scrolls the heading into the first 150 pixels of the viewport. Hit-testing confirms the heading, overview, and first factual reason are uncovered. All three reasons were visibly inspected in light/dark desktop and phone screenshots.
+- Panel height approximately 291 pixels on desktop and 640 on the phone viewport; static positioning, visible overflow, full opacity, and no hiding ancestor. Light text: `rgb(32,40,48)` on white. Dark text: `rgb(240,244,248)` on `rgb(32,42,52)`.
+- Summary updates after area selection, capacity changes, priority selection, advanced weights, tuning, Northwest typed requests, whole-city typed requests, and reset. All Calgary remains selected through the checked reruns.
+- Both theme directions retain applied recommendations, planner reply, area, and capacity. Actual downloaded CSVs match byte-for-byte across themes for the checked ten-location request: 6703 bytes.
+- Equipment photograph loaded at 240 × 240, opacity 1, with horizontal bounds separate from the title/description and vertical bounds below the theme toggle. The road treatment remains faint in both themes. Both photographs are hidden on the phone viewport; no horizontal page overflow.
+- Dropdowns, advanced sliders/help tooltip, rendered basemap, marker hover tooltip, zoom-in/out controls, shortlist, and actual CSV downloads work. No browser page errors were captured.
 
-**Not established:** the precise cause of the user's earlier missing-summary experience. The responsive server's original summary was visible during this inspection. The unresponsive 8501 server and the reproduced stale-module behavior establish real differences between running and verification servers, but neither proves that a particular CSS rule hid that earlier summary. Below-the-fold placement is also a confirmed observation, not a proven cause of disappearance.
+Evidence: [running-server results](ui-checks/current/running/results.json), [fresh-server results](ui-checks/current/fresh/results.json), and [browser audit](ui-checks/check_ui.py).
 
-## Focused implementation
+Current running-server screenshots:
 
-- Exactly one **Recommendation summary** uses a dedicated keyed Streamlit container with `st.html`, avoiding Markdown transformations of its heading/list. It remains in normal document flow immediately above export, map, and shortlist, with automatic height, visible overflow, full opacity, an opaque themed panel, and strong text contrast. It is not an expander.
-- Contents continue to come from the current applied result: area, actual recommendation count, road exclusions/inclusions, applied priorities, and up to three leading locations with factual counts. Planner requests, controls, automatic tuning, and reset feed the same result. Empty results explicitly say no locations qualify; export remains disabled and the map absent in that case.
-- The previous All Calgary fix remains intact: the widget stores the explicit string `ALL`, translated to engine `region=None` only at the boundary. Theme changes retain the applied plan, typed request, reply, and exact result.
-- The title, description, palette, panel layout, controls, planner, scoring, ranking engine, capacity, road filters, map, export, and speech gate are preserved. No engine, export, planning, dependency, or speech files were changed for this correction.
-- Presentation refresh is narrowly scoped to the UI module. It does not clear session settings, planner replies, tuning state, or engine caches. A new regression simulates a stale summary/hero implementation and verifies restoration of the current UI while retaining an active Northwest plan and dark mode.
+- [Light desktop](ui-checks/current/running/light-desktop.png), [dark desktop](ui-checks/current/running/dark-desktop.png), [summary-link destination](ui-checks/current/running/summary-jump.png).
+- [Light summary above map](ui-checks/current/running/light-summary-map.png), [dark summary above map](ui-checks/current/running/dark-summary-map.png).
+- [Light phone summary](ui-checks/current/running/light-mobile-summary.png), [dark phone summary](ui-checks/current/running/dark-mobile-summary.png).
+- [Light map tooltip](ui-checks/current/running/light-map-tooltip.png), [dark map tooltip](ui-checks/current/running/dark-map-tooltip.png).
 
-## Real photographs
+Corresponding fresh-server screenshots are in `ui-checks/current/fresh/`.
 
-Both existing local JPEGs were visually inspected and reused without changing their bytes, sourcing new photographs, or generating imagery. Attribution remains in the app and is updated in [app/assets/ATTRIBUTION.md](../app/assets/ATTRIBUTION.md).
+## Tests and limits
 
-| Asset | Treatment in this correction |
-| --- | --- |
-| `safety-vest-hardhat-life-of-pix.jpg` — Life Of Pix / Pexels, Pexels License | Increased from 120 × 120 to 218 × 218 in its own header grid column, beside the title and description and below the theme toggle. Full opacity and no fading mask make the vest and hardhat noticeable. Proportional cover crop, subtle border, and dark-theme brightness 0.88 retain a restrained appearance. Reduced to 160 × 160 at tablet widths; hidden at 640 pixels and below. |
-| `road-intersection-frak-lopez.jpg` — Frak Lopez / Unsplash, Unsplash License | Removed from the title's full-width image layer and reused as a single page-edge background accent. Proportional cover cropping, opacity 0.12 light / 0.10 dark, theme-aware colored overlays, and intersecting horizontal/vertical fading masks soften every boundary. Most visible in the left margin and open gaps; panels and map remain opaque. Absolute positioning inside the scrolling document, no fixed positioning, repetition, stretching, or animation, and no pointer interception. Reduced below 1000 pixels and disabled at 640 pixels and below. |
+- `.venv/bin/python -m pytest tests -q`: **116 passed in 102.97 seconds**. Existing tests cover current-result summary content and order, empty/sparse results, controls, typed requests, tuning/reset, All Calgary persistence, theme persistence, export, and deferred speech.
+- `.venv/bin/python -m compileall -q app engine`: passed.
+- `git diff --check`: passed.
 
-The pre-change screenshot also showed Streamlit's optional developer notice covering the old equipment-photo corner. This notice was dismissed in the isolated verification browser context for visual assessment; no global user preference or unrelated browser session was modified.
+The supplied dataset did not produce an empty area during browser checks; the empty state is verified by existing synthetic-data AppTests, not claimed as a browser observation. Browser checks use desktop Chrome with resized viewports, not physical phones or other browser engines. Theme persistence is within a Streamlit session. Map tiles still require network access.
 
-## Tests and browser evidence
-
-The in-app browser plugin was attempted first and failed before initialization with a missing `sandboxPolicy` field. Verification therefore used a separate headless instance of installed Google Chrome via the previously installed Playwright utility in `/tmp/double-trouble-browser-tools`. These are actual browser interactions and screenshot inspections, not claims based only on AppTest. No unrelated process was terminated or reconfigured.
-
-| Check | Actual result |
-| --- | --- |
-| `.venv/bin/python -m pytest tests/test_app_ui.py -q` after panel/image changes | 34 passed in 34.68 seconds. |
-| `.venv/bin/python -m pytest tests -q` after panel/image changes | 115 passed in 70.61 seconds. |
-| `.venv/bin/python -m pytest tests -q` after the module-freshness fix | 115 passed in 90.26 seconds. |
-| `.venv/bin/python -m pytest tests/test_app_ui.py::test_stale_presentation_refresh_preserves_applied_plan -q` (new regression added after suite collection) | 1 passed in 3.65 seconds. Together with the final suite, 116 distinct tests passed. |
-| `.venv/bin/python -m compileall -q app engine` | Passed. |
-| `git diff --check` | Passed. |
-
-Browser checks on 8504 covered desktop 1440 × 1050 and narrow 390 × 844 viewports:
-
-- Exactly one summary heading and actual contents, before export/map/shortlist. The panel measured about 291 pixels on desktop and 640 pixels on the phone viewport. Hit-testing confirmed that the heading, overview paragraph, and first factual reason were uncovered; ancestor visibility/opacity were checked, and screenshots of all three reasons were opened and inspected.
-- Light summary text `rgb(32,40,48)` on white; dark text `rgb(240,244,248)` on `rgb(32,42,52)`. Heading and body share full-contrast text, with no translucent panel or photo over them.
-- Summary changes after area selection, capacity changes, priority selection, advanced weights, tuning, Northwest typed requests, whole-city typed requests, and reset. All Calgary remains selected through the relevant reruns.
-- Both theme directions retain summary, applied area and capacity, and planner reply. Theme changes produce byte-identical downloaded CSVs (6703 bytes for the checked ten-location request).
-- Loaded 218-pixel equipment photograph, opacity 1, separate horizontal bounds from title/description, and bounds below the theme toggle. Both photographs are hidden on the phone viewport, with no horizontal page overflow.
-- Native dropdowns, advanced sliders/helper tooltip, functioning map markers and hover tooltip, zoom-in/out controls, current shortlist, and actual CSV downloads. Light/dark CARTO basemaps were visibly rendered. No photograph overlays the map.
-- Road layer is a local JPEG, absolute in the document, non-repeating, smoothly masked, with `pointer-events: none`. Visual inspection confirms faint edge detail in light mode and no bright dark-mode patches; content panels remain readable.
-
-[Browser audit](ui-checks/check_ui.py) and [machine-readable results](ui-checks/correction/results.json). Browser-audit development exposed selector/timing problems and the real 8502 stale-module mismatch. Passing AppTests were not substituted for browser inspection.
-
-The fresh-server workflow checks completed. The existing 8502 server's updated light header and summary were separately captured and inspected after the module-freshness fix. Its remaining dropdown/planner/theme comparison did not complete before the server became unavailable; no completed dark-theme or full control-workflow verification is claimed for that existing process. The final audit records this external-server limitation separately from the passing 8504 checks.
-
-Screenshots from this correction (the earlier screenshots outside `correction/` are historical):
-
-- [Light desktop](ui-checks/correction/light-desktop.png), [dark desktop](ui-checks/correction/dark-desktop.png).
-- [Light summary above map](ui-checks/correction/light-summary-map.png), [dark summary above map](ui-checks/correction/dark-summary-map.png).
-- [Light phone summary](ui-checks/correction/light-mobile-summary.png), [dark phone summary](ui-checks/correction/dark-mobile-summary.png).
-- [Light phone header](ui-checks/correction/light-mobile.png), [dark phone header](ui-checks/correction/dark-mobile.png).
-- [Updated running 8502 header](ui-checks/correction/running-8502-light-header.png), [updated running 8502 summary](ui-checks/correction/running-8502-light-summary.png).
-
-## Limitations and server handling
-
-Port 8501 did not serve a usable page during this session and was left untouched. Its earlier summary state cannot be confirmed. By the final port inspection, neither 8501 nor 8502 had a listener; this agent did not stop either process. The verified app remains available on 8504. Browser verification uses desktop Chrome with resized viewports, not physical phones, Safari/Firefox, or a screen-reader audit. The empty state is verified using existing synthetic-data AppTests; the supplied full dataset did not produce an empty quadrant during browser checks. Theme persistence is within a Streamlit session; new sessions start light. Basemap tiles still require network access. ElevenLabs remains deferred and gated, including when credentials exist.
+No unrelated process was terminated. The existing 8501 app and this session's fresh 8504 verification server remain running. No commit, push, merge, deployment, or ElevenLabs configuration was performed.
