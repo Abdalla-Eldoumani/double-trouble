@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 
 from engine.agent import run
-from engine.data import CSV, load, location_key
+from engine.data import CSV, load, location_key, merge_quadrant_variants
 
 FIXTURE = json.loads((Path(__file__).resolve().parent.parent / "contract" / "sample_output.json").read_text())
 
@@ -56,13 +56,36 @@ def test_baseline_is_true_count_only_order(result):
     raw = pd.read_csv(CSV)
     first = raw["description"].str.lower().str.replace(r"\s+", " ", regex=True).str.split(".", n=1).str[0]
     non_crash = first.str.contains(r"^\s*(?:stalled vehicle|traffic signal|power outage|road work|water main"
-                                   r"|severe weather|hazardous road|lrt gates)|police|oversized load")
-    counts = raw.loc[~non_crash, "incident_info"].map(location_key).value_counts()
+                                   r"|severe weather|hazardous road|lrt gates|due to road conditions|road closed"
+                                   r"|(?:the )?road is closed|the \w+ ramp is closed|cfd )|police|oversized load")
+    kept = raw.loc[~non_crash]
+    keys = merge_quadrant_variants(kept.assign(location_key=kept["incident_info"].map(location_key)))
+    counts = keys.value_counts()
     counts = counts[~counts.index.str.contains("deerfoot|stoney")]
     base = result["baseline"]["top20"]
     assert [b["incidents"] for b in base] == counts.head(20).tolist()
     for b in base:
         assert counts[b["location_key"]] == b["incidents"]
+
+
+def test_quadrant_variants_of_one_crossing_merge_but_distant_ones_do_not():
+    df, _ = load()
+    keys = set(df["location_key"])
+    assert "glenmore trail & macleod trail sw" in keys
+    assert not keys & {"glenmore trail & macleod trail s", "glenmore trail & macleod trail se"}
+    frame = pd.DataFrame({
+        "location_key": ["a & b se"] * 3 + ["a & b sw", "a & b s"],
+        "latitude": [51.0, 51.0, 51.0, 51.0, 51.001],
+        "longitude": [-114.0, -114.0, -114.0, -114.2, -114.0],
+    })
+    assert merge_quadrant_variants(frame).tolist() == ["a & b se"] * 3 + ["a & b sw", "a & b se"]
+
+
+def test_feed_misspellings_join_their_location():
+    assert location_key("Macloed Trail and 11 Avenue SE") == "11 avenue & macleod trail se"
+    assert location_key("Calffrobe bridge and Deerfoot Trail SE") == "calf robe bridge & deerfoot trail se"
+    assert location_key("Country Hills Boulevard and Deer Foot Trail NE") == "country hills boulevard & deerfoot trail ne"
+    assert location_key("Crowchild SW and Glenmore Trail") == location_key("Crowchild Trail and Glenmore Trail")
 
 
 @pytest.mark.parametrize("name, key", [
@@ -142,3 +165,24 @@ def test_count_only_and_movers_carry_display_names(result):
     for entry in result["baseline"]["top20"] + result["movers"]:
         assert entry["name"].strip()
         assert names.get(entry["location_key"], entry["name"]) == entry["name"]
+
+
+def test_ties_at_the_cut_share_credit():
+    from engine.agent import TEST, TRAIN, backtest
+    from engine.score import add_points
+
+    df, _ = load()
+    df = add_points(df)
+    w = {"w_severity": 0.0, "w_trend": 0.0, "exclude_provincial": True}
+    share, caught, total = backtest(df, TRAIN, TEST, w)
+    whole = [backtest(df, TRAIN, TEST, w, n=k)[1] for k in (19, 20, 21)]
+    # Credit grows by the mean of the tied group per extra place, never by one arbitrary pick.
+    assert whole[0] <= caught <= whole[2]
+    assert abs((whole[2] - caught) - (caught - whole[0])) < 0.11
+    assert share == caught / total
+
+
+def test_tuning_uses_the_planner_budget():
+    out = run(tune=True, constraints={"budget": 5})
+    assert out["plan"]["points_agent"] >= out["plan"]["points_baseline"]
+    assert all(it["iteration"] == i for i, it in enumerate(out["agent_iterations"]))
