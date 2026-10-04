@@ -218,7 +218,7 @@ def test_road_scope_and_tuning_preserve_constraints():
     assert tuned["weights"]["exclude_provincial"] is False
     assert tuned["plan"]["constraints"] == {"region": "NW", "budget": 5, "recent_weight": 2.0}
     assert len(tuned["agent_iterations"]) == 15
-    assert at.success
+    assert any('class="dt agent-result"' in node.proto.body for node in at.get("html"))
     assert_consistent(at)
     ask(at, "City roads only.")
     result = at.session_state["last_result"]
@@ -264,7 +264,8 @@ def test_unchanged_rankings_explain_the_recommended_locations():
     assert "There are no" not in reasons
     row = result["top20"][0]
     assert row["early"] + row["late"] == row["incidents"]
-    assert str(row["pedestrian_or_cyclist"]) in ui.location_reason(row, result)
+    ped = row["pedestrian_or_cyclist"]
+    assert (f"{ped} pedestrian or cyclist" if ped else "no pedestrian or cyclist reports") in ui.location_reason(row, result)
 
 
 def test_validation_preserves_negative_values_and_units():
@@ -464,3 +465,27 @@ def test_summary_uses_only_current_counts_and_escapes_names():
     assert '&lt;unsafe &amp; location&gt;' in output
     assert "before area and road filters" in output
     assert 'role="region"' in output and '<section' not in output
+
+
+def test_agent_button_runs_the_weight_search_and_states_what_it_kept():
+    at = app()
+    click(at, "Let the agent pick the weights")
+    result = at.session_state["last_result"]
+    assert len(result["agent_iterations"]) == 15
+    panel = next(node.proto.body for node in at.get("html") if 'class="dt agent-result"' in node.proto.body)
+    assert panel_reports_result(panel, result)
+    assert_consistent(at)
+
+
+def panel_reports_result(panel, result):
+    w = result["weights"]
+    return (f'{w["w_severity"]:.2f}' in panel and f'{w["w_trend"]:.2f}' in panel
+            and f'{len(result["agent_iterations"])} weight options' in panel)
+
+
+def test_counts_are_pluralised_and_zero_reads_as_none():
+    row = {"incidents": 1, "pedestrian_or_cyclist": 0, "multi_vehicle": 1, "multiple_lanes": 2}
+    reason = ui.location_reason(row)
+    assert "Recorded 1 crash, with no pedestrian or cyclist reports." in reason
+    assert "1 report involving several vehicles" in reason and "2 reports of more than one lane blocked" in reason
+    assert "1 reports" not in reason and "0 reports" not in reason
