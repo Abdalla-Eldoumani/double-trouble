@@ -81,3 +81,41 @@ def summary(settings):
             parts.append("Additional importance for increasing activity")
     parts.append("Deerfoot and Stoney excluded" if w["exclude_provincial"] else "Deerfoot and Stoney included")
     return " · ".join(parts)
+
+
+def confirmation(asked, settings):
+    """Short spoken reply: requested fields, using only their applied values."""
+    w, c = settings["weights"], settings["constraints"]
+    weight_fields, constraint_fields = asked["weights"], asked["constraints"]
+    area = f"{AREA_OPTIONS[c['region']].lower()} Calgary" if c["region"] else "all Calgary"
+    if asked["reset"]:
+        roads = "excluded" if w["exclude_provincial"] else "included"
+        return (f"Got it. Reset to {area}, up to {c['budget']} locations, "
+                f"{preset_name(settings).lower()}, with Deerfoot and Stoney {roads}.")
+    if asked["tune"]:
+        weight_fields = {**weight_fields, "w_severity": w["w_severity"], "w_trend": w["w_trend"]}
+    parts = []
+    if "budget" in constraint_fields:
+        parts.append(f"Showing up to {c['budget']} locations in {area}")
+    elif "region" in constraint_fields:
+        parts.append(f"Showing {area}" + (" only" if c["region"] else " again"))
+    if "recent_weight" in constraint_fields:
+        if c["recent_weight"] == 1:
+            recency = "July to December crashes weighted the same as earlier crashes"
+        else:
+            times = "twice" if c["recent_weight"] == 2 else f"{c['recent_weight']:g} times"
+            recency = f"July to December crashes weighted {times} as much"
+        if parts:
+            parts[-1] += ", with " + recency
+        else:
+            parts.append(recency)
+    if "w_severity" in weight_fields:
+        parts.append("Pedestrian, cyclist, multi-vehicle and blocked-lane reports " +
+                     ("have added importance" if w["w_severity"] else "have no extra weighting"))
+    if "w_trend" in weight_fields:
+        parts.append("Increasing crash activity " +
+                     ("has added importance" if w["w_trend"] else "has no extra weighting"))
+    if "exclude_provincial" in weight_fields:
+        parts.append("Deerfoot and Stoney " + ("excluded" if w["exclude_provincial"] else "included"))
+    prefix = "Got it. Ranking options tested. " if asked["tune"] else "Got it. "
+    return prefix + ". ".join(parts) + "."

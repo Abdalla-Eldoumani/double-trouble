@@ -16,7 +16,7 @@ from app.load import ResultShapeError, consistency_warnings, get_result
 # A long-lived Streamlit process can rerun this script while retaining an older
 # imported presentation/speech modules. Refresh those when their source changes;
 # session settings, cached results, and the ranking engine stay intact.
-for presentation_module in (ui, briefing):
+for presentation_module in (ui, briefing, planning):
     source_mtime = Path(presentation_module.__file__).resolve().stat().st_mtime_ns
     if getattr(presentation_module, "_source_mtime_ns", None) != source_mtime:
         from importlib import reload
@@ -111,13 +111,28 @@ def apply_request(text):
     if previous is not None and "plan" not in previous:
         previous = None
     reply = {"request": text, "text": (
-        ("Ranking options tested. Updated: " if asked["tune"] else "Updated: ") + planning.summary(ss.settings) + "." if recognized else
+        planning.confirmation(asked, ss.settings) if recognized else
         "Settings unchanged. Try an area, a number of locations, pedestrian/cyclist priorities, "
         "recent crash weighting, or road exclusions."
     )}
     if result.get("plan"):
         reply["comparison"] = compare(previous, result)
     ss.reply = reply
+    # Apply and build the text reply before the optional speech request. Audio
+    # belongs to this reply only; ordinary reruns never synthesize it again.
+    key = briefing.api_key() if recognized and result.get("plan") else None
+    if key:
+        config = briefing.speech_config()
+        with st.spinner("Preparing spoken confirmation…"):
+            try:
+                reply["audio"] = briefing.synthesize(
+                    reply["text"], key, voice_id=config["voice_id"],
+                    model_id=config["tts_model"], action="Reading the confirmation",
+                )
+            except briefing.SpeechError as exc:
+                reply["audio_error"] = "Request applied. " + str(exc)
+            else:
+                reply["audio_fresh"] = True
     return result
 
 
@@ -234,6 +249,11 @@ with ask_col, st.container(key="planner"):
             st.caption('Supported examples: “Show the top 20 locations in northeast Calgary.” “Give pedestrian and cyclist crashes more importance.” “Exclude Deerfoot and Stoney Trail.” “Now show all Calgary.” “Find the best ranking automatically.”')
     if ss.get("reply"):
         st.markdown(ui.reply(ss.reply), unsafe_allow_html=True)
+        if ss.reply.get("audio"):
+            st.audio(ss.reply["audio"], format="audio/mpeg",
+                     autoplay=ss.reply.pop("audio_fresh", False))
+        if ss.reply.get("audio_error"):
+            st.warning(ss.reply["audio_error"])
 
 if not interactive:
     st.caption("Sample output: planning controls are unavailable until the engine is connected. These are illustrative recommendations.")
