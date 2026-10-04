@@ -232,7 +232,7 @@ with weights_col, st.container(key="controls"):
     area_col, budget_col = st.columns([1, 1.25], gap="medium")
     area_col.selectbox("Area", [ALL_AREAS, *ui.REGIONS], key="area", on_change=set_scope,
                        format_func=lambda a: ui.REGIONS.get(a, a), disabled=not scoped)
-    budget_col.slider("Locations the team can visit", 1, 20, key="budget", on_change=set_scope,
+    budget_col.slider("Locations to visit", 1, 20, key="budget", on_change=set_scope,
                       disabled=not scoped)
     st.slider("Severity weight", 0.0, 1.0, step=0.05, key="w_severity", on_change=clear_reply,
               help="Harm score per incident: 1, plus 3 when the text names a pedestrian or cyclist, plus 1 for "
