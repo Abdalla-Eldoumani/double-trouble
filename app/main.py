@@ -99,6 +99,8 @@ def apply_request(text):
     asked = parse(text)
     if asked["reset"]:
         constraints, weights = dict(asked["constraints"]), dict(ss.get("default_weights") or DEFAULT_WEIGHTS)
+        if "opening" in ss:
+            ss.tuned = ss.opening
     else:
         constraints = {**(ss.get("constraints") or {}), **asked["constraints"]}
         weights = {**current_weights(), **asked["weights"]}
@@ -139,9 +141,10 @@ def movement(row):
     return "same"
 
 
-def weight_state():
+def weight_state(constraints):
     weights = current_weights()
-    if "tuned" in ss and ss.tuned["weights"] == weights:
+    tuned = ss.get("tuned")
+    if tuned and tuned["weights"] == weights and tuned.get("plan", {}).get("constraints") == constraints:
         return "Chosen by the agent", True
     if weights["w_severity"] == 0 and weights["w_trend"] == 0:
         return "Count only", False
@@ -157,7 +160,7 @@ try:
     if first_load:
         # Open on the agent's own choice, so the first screen shows what it changed and why.
         result = get_result(tune=True)
-        ss.tuned = result
+        ss.tuned = ss.opening = result
         set_weights(result["weights"])
         ss.default_weights = current_weights()
     if request is not None:
@@ -225,7 +228,7 @@ with ask_col, st.container(key="planner"):
         st.error(ss.pop("planner_error"))
 
 with weights_col, st.container(key="controls"):
-    state, agent_set = weight_state()
+    state, agent_set = weight_state(plan["constraints"] if plan else None)
     st.markdown(ui.card_head("How much should harm count?", state=state, agent_set=agent_set),
                 unsafe_allow_html=True)
     scoped = bool(result.get("plan"))
@@ -253,7 +256,7 @@ if ss.get("reply"):
         if reply.get("audio"):
             st.audio(reply["audio"], format="audio/mpeg", autoplay=reply.pop("fresh", False))
         if reply.get("audio_error"):
-            st.error(reply["audio_error"])
+            st.caption(reply["audio_error"])
 
 # 01: the shortlist
 where = f"{ui.REGIONS[region]} Calgary" if region else "Calgary"
@@ -327,6 +330,8 @@ if "tuned" in ss:
             f"Chosen: severity {w['w_severity']:.2f}, trend {w['w_trend']:.2f}.")
     if w != current_weights():
         note += " The sliders have changed since that run."
+    elif plan and tuned.get("plan") and tuned["plan"]["constraints"] != plan["constraints"]:
+        note += " That run was for a different area or budget; press Let the agent tune it to re-run."
     st.markdown(ui.section(4, "How the agent chose", note), unsafe_allow_html=True)
     st.markdown(ui.trace(tuned), unsafe_allow_html=True)
 else:
@@ -345,7 +350,7 @@ if key:
         try:
             st.audio(briefing.synthesize(script, key), format="audio/mpeg")
         except Exception as exc:
-            st.error(f"Audio failed ({type(exc).__name__}). The script is below.")
+            st.caption(f"Audio failed ({type(exc).__name__}). The script is below.")
     note = "Read by an ElevenLabs voice. Every name and number comes from the ranking above."
 else:
     note = "Script for the spoken briefing. Every name and number comes from the ranking above."
