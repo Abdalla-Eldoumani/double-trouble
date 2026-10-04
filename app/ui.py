@@ -5,11 +5,24 @@ from pathlib import Path
 
 CSS_PATH = Path(__file__).resolve().parent / "style.css"
 REGIONS = {"NE": "Northeast", "NW": "Northwest", "SE": "Southeast", "SW": "Southwest"}
-PHOTO_CREDITS = ("Page photographs (illustrative scenes outside Calgary): "
+PHOTO_CREDITS = ("Page background photograph (an illustrative scene outside Calgary): "
                  "[Frak Lopez / Unsplash](https://unsplash.com/photos/FI_jpaK_fzQ), "
-                 "[Unsplash License](https://unsplash.com/license); "
-                 "[Life Of Pix / Pexels](https://www.pexels.com/photo/man-wearing-hard-hat-standing-8159/), "
-                 "[Pexels License](https://www.pexels.com/license/). Cropped and resized for this page.")
+                 "[Unsplash License](https://unsplash.com/license). Cropped and resized for this page.")
+
+
+def plural(count, singular, plural_form=None):
+    """'1 crash', '2 crashes': counts always come straight from the result."""
+    return f"{count} {singular if count == 1 else (plural_form or singular + 's')}"
+
+
+def _vulnerable(count):
+    return (plural(count, "pedestrian or cyclist report") if count else
+            "no pedestrian or cyclist reports")
+
+
+INDICATORS = (("multi_vehicle", "report involving several vehicles", "reports involving several vehicles"),
+              ("multiple_lanes", "report of more than one lane blocked", "reports of more than one lane blocked"))
+WEIGHTED = "pedestrian or cyclist, several-vehicle and lanes-blocked reports"
 
 
 def theme_css(dark=False):
@@ -57,11 +70,13 @@ def current_settings(settings):
 
 
 def location_reason(row, result=None, compact=False):
-    parts = [f"Recorded {row['incidents']} crashes, including {row['pedestrian_or_cyclist']} reports involving pedestrians or cyclists."]
+    ped = row["pedestrian_or_cyclist"]
+    parts = [f"Recorded {plural(row['incidents'], 'crash', 'crashes')}, "
+             + (f"including {_vulnerable(ped)}." if ped else f"with {_vulnerable(ped)}.")]
     indicators = []
-    for key, label in (("multi_vehicle", "multi-vehicle reports"), ("multiple_lanes", "reports of multiple blocked lanes")):
+    for key, one, many in INDICATORS:
         if row.get(key):
-            indicators.append(f"{row[key]} {label}")
+            indicators.append(plural(row[key], one, many))
     if indicators:
         parts.append("Also recorded " + " and ".join(indicators) + ".")
     if result:
@@ -70,24 +85,24 @@ def location_reason(row, result=None, compact=False):
         if compact:
             priorities = []
             if w["w_severity"]:
-                priorities.append("incident indicators")
+                priorities.append(WEIGHTED)
             if w["w_trend"]:
-                priorities.append("increasing activity")
+                priorities.append("rising crash counts")
             if recent != 1:
                 priorities.append("July–December reports")
-            parts.append("Additional importance for " + ", ".join(priorities) + "." if priorities else
+            parts.append("Your priorities add weight for " + "; ".join(priorities) + "." if priorities else
                          "Selected by total reported crashes.")
             return " ".join(parts)
         if w["w_severity"]:
-            parts.append("Incident indicators receive additional importance in this ranking.")
+            parts.append(f"Your priorities add weight for {WEIGHTED}.")
         elif not w["w_trend"] and recent == 1:
             parts.append("Selected by total reported crashes.")
         if (recent != 1 or w["w_trend"]) and {"early", "late"} <= row.keys():
-            parts.append(f"January–June: {row['early']} crashes; July–December: {row['late']}.")
+            parts.append(f"January–June: {plural(row['early'], 'crash', 'crashes')}; July–December: {row['late']}.")
             if recent != 1:
                 parts.append(f"July–December reports receive {recent:g}× importance.")
             if w["w_trend"]:
-                parts.append("The ranking also considers the ratio of later to earlier activity.")
+                parts.append("The ranking also rewards crash counts that rose in the second half of the year.")
     return " ".join(parts)
 
 
@@ -102,17 +117,16 @@ def location_evidence(row, result):
     """Compact observed counts, selected for the criteria actually applied."""
     facts = []
     if "incidents" in row:
-        facts.append(f"{row['incidents']} reported crashes")
+        facts.append(plural(row["incidents"], "reported crash", "reported crashes"))
     if "pedestrian_or_cyclist" in row:
-        facts.append(f"{row['pedestrian_or_cyclist']} pedestrian/cyclist reports")
+        facts.append(_vulnerable(row["pedestrian_or_cyclist"]))
     if result["weights"]["w_severity"]:
-        for key, label in (("multi_vehicle", "multi-vehicle reports"),
-                           ("multiple_lanes", "reports of multiple blocked lanes")):
+        for key, one, many in INDICATORS:
             if row.get(key):
-                facts.append(f"{row[key]} {label}")
+                facts.append(plural(row[key], one, many))
     recent = result.get("plan", {}).get("constraints", {}).get("recent_weight", 1)
     if (recent != 1 or result["weights"]["w_trend"]) and {"early", "late"} <= row.keys():
-        facts.append(f"January–June: {row['early']} crashes; July–December: {row['late']}")
+        facts.append(f"January–June: {plural(row['early'], 'crash', 'crashes')}; July–December: {row['late']}")
     return "; ".join(facts) + "." if facts else "Incident detail is unavailable in this sample output."
 
 
@@ -123,7 +137,7 @@ def summary_reason(row, result):
     if (result["weights"]["w_trend"] or
             result.get("plan", {}).get("constraints", {}).get("recent_weight", 1) != 1):
         return location_evidence(row, result)
-    return f"{row['incidents']} reported crashes; selected by total crash reports."
+    return f"{plural(row['incidents'], 'reported crash', 'reported crashes')}; selected by total crash reports."
 
 
 def summary_details(result):
@@ -143,12 +157,13 @@ def recommendation_summary(result):
     details = summary_details(result)
     rows, area, road_scope = details["rows"], details["area"], details["road_scope"]
     overview = f"{len(rows)} locations recommended in {area} · {road_scope}."
-    items = "".join(f'<li><b>{esc(r["name"])}</b> — {esc(summary_reason(r, result))}</li>' for r in rows[:3])
+    items = "".join(f'<li><span class="sum-rank">{r["rank"]}</span><div><b>{esc(r["name"])}</b>'
+                    f'<span class="sum-why">{esc(summary_reason(r, result))}</span></div></li>' for r in rows[:3])
     body = f'<ul>{items}</ul>' if rows else '<p>No locations qualify for the applied area and road scope.</p>'
     return ('<div class="dt recommendation-summary" role="region" aria-label="Recommendation summary">'
             '<h3 id="recommendation-summary">Recommendation summary</h3>'
-            f'<p>{esc(overview)}</p><p>Applied priorities: {esc(details["priorities"])}.</p>'
-            f'{body}<div class="summary-note">Location counts cover January–December 2025. '
+            f'<p class="sum-overview">{esc(overview)}</p><p class="sum-priorities">Applied priorities: {esc(details["priorities"])}.</p>'
+            f'{body}<div class="summary-note">Counts cover January–December 2025. '
             'The crash total above covers the full cleaned dataset, before area and road filters.</div></div>')
 
 
@@ -176,16 +191,16 @@ def priority_effect(row, result):
     effects = []
     if w["w_severity"]:
         indicators = []
-        for key, label in (("pedestrian_or_cyclist", "pedestrian/cyclist reports"),
+        for key, label in (("pedestrian_or_cyclist", "pedestrian or cyclist reports"),
                            ("multi_vehicle", "multi-vehicle reports"),
                            ("multiple_lanes", "reports of multiple blocked lanes")):
             if row.get(key):
                 indicators.append(f"{row[key]} {label}")
         if indicators:
-            effects.append("Your incident priorities give additional importance to this location’s "
+            effects.append("Your priorities add weight to this location’s "
                            + ", ".join(indicators) + ".")
         elif all(key in row for key in ("pedestrian_or_cyclist", "multi_vehicle", "multiple_lanes")):
-            effects.append("No additional incident indicators are recorded here; other locations can receive extra importance for those reports.")
+            effects.append("No pedestrian or cyclist, several-vehicle or lanes-blocked reports here, so other locations gained weight instead.")
     if w["w_trend"] and {"early", "late"} <= row.keys():
         effects.append(f"Reports went from {row['early']} in January–June to {row['late']} in July–December; "
                        "your priorities also consider later activity relative to earlier activity.")
@@ -302,12 +317,10 @@ def masthead():
 
 def hero(title, lede, data):
     before, accent, after = title
-    equipment = photo_uri("safety-vest-hardhat-life-of-pix.jpg")
-    imagery = (f'<img class="hero-equipment" src="{equipment}" alt="" aria-hidden="true" width="320" height="320">' if equipment else "")
     return (
         '<div class="dt hero"><div class="hero-copy"><div class="title" role="heading" aria-level="1">'
         f'{esc(before)}<em>{esc(accent)}</em>{esc(after)}</div>'
-        f'<div class="hero-side"><div class="lede">{esc(lede)}</div></div></div>{imagery}</div>'
+        f'<div class="hero-side"><div class="lede">{esc(lede)}</div></div></div></div>'
     )
 
 
@@ -340,9 +353,9 @@ def figures(result):
                 [r["location_key"] for r in result["baseline"]["top20"][:len(rows)]])
     beyond = len({r["location_key"] for r in rows} - set(baseline))
     cells = [
-        ("Reported crashes analyzed", f'{result["dataset"]["rows_used"]:,}', "Full 2025 dataset after cleaning; before area and road filters."),
-        ("Locations recommended", str(len(rows)), "The current shortlist within your investigation capacity."),
-        ("Selected beyond crash totals", str(beyond), "These locations enter the shortlist when your additional priorities are considered."),
+        ("Reported crashes analyzed", f'{result["dataset"]["rows_used"]:,}', "All of 2025, before area and road filters."),
+        ("Locations recommended", str(len(rows)), "Fits your investigation capacity."),
+        ("Selected beyond crash totals", str(beyond), "Added by your priorities, not by crash count alone."),
     ]
     out = []
     for label, value, note in cells:
@@ -355,6 +368,14 @@ def recommendation_link():
     """Make the single, below-controls summary discoverable from the opening view."""
     return ('<div class="dt recommendation-link">'
             '<a href="#recommendation-summary">View current recommendations ↓</a></div>')
+
+
+def step(number, title, note=""):
+    """Section heading with a quiet step cue, so the page reads top to bottom."""
+    note_html = f'<div class="sec-note">{esc(note)}</div>' if note else ""
+    return ('<div class="dt sec step">'
+            f'<div class="sec-step">Step {number}</div>'
+            f'<div class="sec-title" role="heading" aria-level="2">{esc(title)}</div>{note_html}</div>')
 
 
 def section(number, title, note=""):
@@ -398,13 +419,38 @@ def _delta(was, rank):
     return "=", "same"
 
 
+def ledger_facts(row):
+    """Counts only; the reasons are written out once, under 'Why these locations'."""
+    facts = [plural(row["incidents"], "crash", "crashes")] if "incidents" in row else []
+    if "pedestrian_or_cyclist" in row:
+        facts.append(_vulnerable(row["pedestrian_or_cyclist"]))
+    if row.get("rank") is not None and row.get("baseline_rank") not in (None, row["rank"]):
+        facts.append(f"#{row['baseline_rank']} by crash count alone")
+    return " · ".join(facts)
+
+
+def agent_result(result):
+    """Plain statement of what the automatic weight search kept, from the result only."""
+    its, w = result.get("agent_iterations") or [], result["weights"]
+    kept_plain = not w["w_severity"] and not w["w_trend"]
+    head = (f"The agent tested {plural(len(its), 'weight option')} on earlier 2025 reports "
+            f"and kept the plain crash count." if kept_plain else
+            f"The agent tested {plural(len(its), 'weight option')} on earlier 2025 reports and kept these weights.")
+    chips = (f'<span>Pedestrian, cyclist and incident weight {w["w_severity"]:.2f}</span>'
+             f'<span>Rising-crash weight {w["w_trend"]:.2f}</span>')
+    return ('<div class="dt agent-result" role="status"><div class="agent-head">'
+            f'{esc(head)}</div><div class="agent-chips">{chips}</div>'
+            '<div class="agent-note">It keeps the plain count when no option scores higher on later reports. '
+            'This is a historical check, not proof of crash reduction.</div></div>')
+
+
 def shortlist(rows, result=None):
-    out = ['<div class="dt ledger"><div class="lg-head"><span>Rank</span><span>Location and reported incidents</span></div>']
+    out = ['<div class="dt ledger"><div class="lg-head"><span>Rank</span><span>Location</span></div>']
     for r in rows:
         out.append(
             f'<div class="lg-row"><span class="lg-rank">{r["rank"]}</span><div>'
             f'<span class="lg-name">{esc(r["name"])}</span>'
-            f'<div class="lg-detail">{esc(location_reason(r, result, compact=True))}</div></div></div>'
+            f'<div class="lg-detail">{esc(ledger_facts(r))}</div></div></div>'
         )
     return "".join(out) + "</div>"
 
