@@ -28,6 +28,20 @@ def from_result(result):
             "constraints": dict(result.get("plan", {}).get("constraints", DEFAULT_CONSTRAINTS))}
 
 
+def priority_description(settings):
+    """Readable applied criteria, including custom settings, without implying a filter."""
+    w, c = settings["weights"], settings["constraints"]
+    criteria = []
+    if w["w_severity"]:
+        criteria.append("pedestrian/cyclist, multi-vehicle and blocked-lane indicators")
+    if w["w_trend"]:
+        criteria.append("increasing crash activity")
+    if c["recent_weight"] != 1:
+        criteria.append(f"July–December 2025 reports weighted {c['recent_weight']:g}×")
+    label = preset_name(settings)
+    return label + (": " + "; ".join(criteria) if criteria else "")
+
+
 def summary(settings):
     from app.ui import REGIONS
 

@@ -9,7 +9,7 @@ import pytest
 import streamlit as st
 from streamlit.testing.v1 import AppTest
 
-from app import planning, ui
+from app import export, planning, ui
 from engine.agent import DEFAULT_CONSTRAINTS, DEFAULT_WEIGHTS, backtest, run
 from engine.data import load
 from engine.planner import parse
@@ -64,6 +64,20 @@ def assert_consistent(at):
     assert f'Locations recommended</div><div class="fig-value">{len(rows)}</div>' in figures
     assert f'Selected beyond crash totals</div><div class="fig-value">{beyond}</div>' in figures
     assert figures in " ".join(md.value for md in at.markdown)
+    summaries = [md for md in at.markdown if 'class="dt recommendation-summary"' in md.value]
+    assert len(summaries) == 1 and summaries[0].value == ui.recommendation_summary(result)
+    assert summaries[0].value.count("<li>") == min(3, len(rows))
+    assert len(at.download_button) == 1
+    assert at.download_button(key="export_shortlist").label == "Export investigation shortlist"
+    assert at.download_button(key="export_shortlist").disabled == (not rows)
+    expected_changes = ui.changed_locations(result)
+    if expected_changes:
+        changes = next(md.value for md in at.markdown if 'class="dt ranking-changes"' in md.value)
+        assert changes.count('class="ranking-change"') == len(expected_changes)
+        for mover in expected_changes:
+            assert f'#{mover["from_rank"]} → #{mover["to_rank"]}' in changes
+    else:
+        assert ui.NO_MOVEMENT in text(at)
     charts = at.get("deck_gl_json_chart")
     if rows:
         assert len(charts) == 1
@@ -83,7 +97,7 @@ def test_opening_defaults_and_reset_are_truthful():
     assert at.session_state["last_result"]["agent_iterations"][0]["note"].startswith("given weights, not tuned")
     assert "Where should Calgary focus its next" in text(at)
     assert "Why these locations are priorities" in text(at)
-    assert [e.label for e in at.expander] == ["Advanced controls", "How we tested the ranking", "Briefing summary", "About the data"]
+    assert [e.label for e in at.expander] == ["Advanced controls", "How we tested the ranking", "About the data"]
     assert all(not e.proto.expanded for e in at.expander)
     assert_consistent(at)
     ask(at, EXAMPLE)
@@ -92,6 +106,64 @@ def test_opening_defaults_and_reset_are_truthful():
     click(at, "Reset settings")
     assert at.session_state["settings"] == {"weights": DEFAULT_WEIGHTS, "constraints": DEFAULT_CONSTRAINTS}
     assert_consistent(at)
+
+
+def test_summary_and_download_update_with_all_planning_inputs(monkeypatch):
+    downloads = []
+    original_download = st.download_button
+
+    def capture(*args, **kwargs):
+        downloads.append(dict(kwargs))
+        return original_download(*args, **kwargs)
+
+    monkeypatch.setattr(st, "download_button", capture)
+    at = app()
+
+    def check():
+        import io
+
+        result = at.session_state["last_result"]
+        data = pd.read_csv(io.BytesIO(downloads[-1]["data"]))
+        rows = ui.recommended_rows(result)
+        assert data["Location"].tolist() == [r["name"] for r in rows]
+        assert data["Rank"].tolist() == [r["rank"] for r in rows]
+        assert data["Requested investigation capacity"].tolist() == [at.number_input(key="capacity").value] * len(rows)
+        assert data["Deerfoot/Stoney excluded"].tolist() == [at.checkbox(key="exclude_provincial").value] * len(rows)
+        assert data["Incident-indicator weight"].tolist() == [at.slider(key="w_severity").value] * len(rows)
+        assert data["Increasing-activity weight"].tolist() == [at.slider(key="w_trend").value] * len(rows)
+        assert data["Recent-crash multiplier"].tolist() == [at.slider(key="recent_weight").value] * len(rows)
+        assert downloads[-1]["file_name"] == export.shortlist_csv(result)[1]
+        assert_consistent(at)
+
+    check()
+    ask(at, EXAMPLE)
+    check()
+    at.selectbox(key="area").select("NE").run()
+    check()
+    at.selectbox(key="priorities").select("Pedestrians and cyclists").run()
+    check()
+    at.number_input(key="capacity").set_value(10).run()
+    check()
+    at.checkbox(key="exclude_provincial").uncheck().run()
+    check()
+    click(at, "Test ranking options automatically")
+    check()
+    assert at.expander[0].label == "Advanced controls" and not at.expander[0].proto.expanded
+
+
+def test_summary_is_visible_before_map_and_sliders_use_honest_labels():
+    at = app()
+    nodes = list(at.main)
+    summary_pos = next(i for i, node in enumerate(nodes) if node.type == "markdown" and 'class="dt recommendation-summary"' in node.value)
+    map_pos = next(i for i, node in enumerate(nodes) if node.type == "deck_gl_json_chart")
+    assert summary_pos < map_pos
+    assert at.slider(key="w_severity").label == "Give more priority to pedestrian/cyclist and other crash indicators"
+    assert at.slider(key="w_trend").label == "Give more priority to locations with increasing crashes"
+    assert at.slider(key="recent_weight").label == "Give more priority to recent crashes"
+    captions = " ".join(c.value for c in at.caption)
+    assert "do not filter out other crash types" in captions
+    assert "not confirmed injury severity" in captions
+    assert "July–December 2025" in at.slider(key="recent_weight").help
 
 
 def test_control_and_planner_changes_retain_other_fields():

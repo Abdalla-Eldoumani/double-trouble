@@ -64,6 +64,88 @@ def text_briefing(result):
     return " ".join(f"#{r['rank']}, {r['name']}. {location_reason(r, result)}" for r in rows[:5])
 
 
+def location_evidence(row, result):
+    """Compact observed counts, selected for the criteria actually applied."""
+    facts = []
+    if "incidents" in row:
+        facts.append(f"{row['incidents']} reported crashes")
+    if "pedestrian_or_cyclist" in row:
+        facts.append(f"{row['pedestrian_or_cyclist']} pedestrian/cyclist reports")
+    if result["weights"]["w_severity"]:
+        for key, label in (("multi_vehicle", "multi-vehicle reports"),
+                           ("multiple_lanes", "reports of multiple blocked lanes")):
+            if row.get(key):
+                facts.append(f"{row[key]} {label}")
+    recent = result.get("plan", {}).get("constraints", {}).get("recent_weight", 1)
+    if (recent != 1 or result["weights"]["w_trend"]) and {"early", "late"} <= row.keys():
+        facts.append(f"January–June: {row['early']} crashes; July–December: {row['late']}")
+    return "; ".join(facts) + "." if facts else "Incident detail is unavailable in this sample output."
+
+
+def recommendation_summary(result):
+    from app import planning
+
+    settings = planning.from_result(result)
+    c, w = settings["constraints"], settings["weights"]
+    rows = recommended_rows(result)
+    area = f"{REGIONS[c['region']]} Calgary" if c["region"] else "All Calgary"
+    road_scope = "Deerfoot and Stoney excluded by location name" if w["exclude_provincial"] else "Deerfoot and Stoney included"
+    overview = f"{len(rows)} locations recommended in {area} · {road_scope}."
+    items = "".join(f'<li><b>{esc(r["name"])}</b> — {esc(location_evidence(r, result))}</li>' for r in rows[:3])
+    body = f'<ul>{items}</ul>' if rows else '<p>No locations qualify. Try another area or road scope.</p>'
+    return ('<section class="dt recommendation-summary" aria-label="Recommendation summary">'
+            '<h3>Recommendation summary</h3>'
+            f'<p>{esc(overview)}</p><p>Applied priorities: {esc(planning.priority_description(settings))}.</p>'
+            f'{body}<div class="summary-note">Location counts cover January–December 2025. '
+            'The crash total above covers the full cleaned dataset.</div></section>')
+
+
+NO_MOVEMENT = ("The ranking matches the list based on total crashes. "
+               "Change priorities or test ranking options to compare alternatives.")
+
+
+def changed_locations(result):
+    """Actual movers across either top 20, including locations outside today's shortlist."""
+    changes, seen = [], set()
+    for mover in result["movers"]:
+        key = mover["location_key"]
+        if mover["from_rank"] != mover["to_rank"] and key not in seen:
+            changes.append(mover)
+            seen.add(key)
+        if len(changes) == 3:
+            break
+    return changes
+
+
+def ranking_changes(result, name_of):
+    changes = changed_locations(result)
+    if not changes:
+        if not result.get("plan") and any(r["rank"] != r["baseline_rank"] for r in result["top20"]):
+            # The legacy sample has contradictory ranks and unchanged mover entries.
+            return '<div class="dt empty">No consistent ranking-change details are available in this sample output.</div>'
+        return f'<div class="dt empty">{esc(NO_MOVEMENT)}</div>'
+    current = {r["location_key"]: r for r in result["top20"]}
+    baseline = {r["location_key"]: r for r in result["baseline"]["top20"]}
+    cards = []
+    for mover in changes:
+        key = mover["location_key"]
+        # Existing contracts need not include the optional counts on movers.
+        evidence = {**baseline.get(key, {}), **current.get(key, {}), **mover}
+        direction = "Moved higher" if mover["to_rank"] < mover["from_rank"] else "Moved lower"
+        cards.append(
+            '<article class="ranking-change">'
+            f'<h3>{esc(name_of(key))} — #{mover["from_rank"]} → #{mover["to_rank"]}</h3>'
+            f'<div class="change-direction">{direction}</div>'
+            f'<p>{esc(location_evidence(evidence, result))}</p></article>'
+        )
+    from app import planning
+    criteria = planning.priority_description(planning.from_result(result))
+    return ('<div class="dt ranking-changes"><div class="change-context">'
+            f'From rank by total crashes → rank with current priorities. Applied criteria: {esc(criteria)}. '
+            'Counts describe the evidence used; movement also depends on other eligible locations.</div>'
+            + "".join(cards) + '</div>')
+
+
 def validation(result):
     """Display shares and signed differences, retaining negative and undefined outcomes."""
     m, plan = result["metrics"], result.get("plan")

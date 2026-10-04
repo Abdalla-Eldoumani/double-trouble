@@ -10,7 +10,7 @@ import pandas as pd
 import pydeck as pdk
 import streamlit as st
 
-from app import briefing, planning, ui
+from app import briefing, export, planning, ui
 from app.load import ResultShapeError, consistency_warnings, get_result
 
 st.set_page_config(page_title="Calgary traffic-safety investigations", layout="wide")
@@ -202,7 +202,10 @@ if ss.get("tuning_confirmation"):
     st.success(ss.tuning_confirmation)
 where = f"{ui.REGIONS[region]} Calgary" if region else "Calgary"
 st.markdown(ui.section(1, "Recommended locations", f"Up to {budget} locations in {where}."), unsafe_allow_html=True)
-st.markdown(ui.current_settings(ss.settings), unsafe_allow_html=True)
+st.markdown(ui.recommendation_summary(result), unsafe_allow_html=True)
+csv_data, csv_filename = export.shortlist_csv(result)
+st.download_button("Export investigation shortlist", data=csv_data, file_name=csv_filename,
+                   mime="text/csv", disabled=not rows, on_click="ignore", key="export_shortlist")
 if len(rows) < budget:
     st.info(f"{len(rows)} locations qualify for the requested {budget}. Only locations with retained crash records "
             "in the selected area and road scope can be recommended.")
@@ -237,13 +240,20 @@ else:
 
 st.markdown(ui.section(2, "Why these locations are priorities", "Reasons for the leading recommendations, based on reported incidents."), unsafe_allow_html=True)
 st.markdown(ui.movers(result, lambda k: briefing.display_name(names, k)), unsafe_allow_html=True)
+st.markdown(ui.section(3, "What changed from ranking by crash totals?",
+                       "Ranking positions across the two top-20 lists, not measured changes in road safety."), unsafe_allow_html=True)
+st.markdown(ui.ranking_changes(result, lambda k: briefing.display_name(names, k)), unsafe_allow_html=True)
 with st.expander("Advanced controls", expanded=False):
-    st.caption("Incident indicators come from reported descriptions: pedestrian/cyclist involvement, multiple vehicles, or blocked lanes. They are not verified injury-severity measurements.")
-    st.slider("Importance of incident indicators", 0.0, 1.0, step=0.05, key="w_severity", on_change=change_control, args=("w_severity",), disabled=not interactive)
-    st.caption("Increasing activity compares July–December with January–June, using (later crashes + 1) / (earlier crashes + 1).")
-    st.slider("Importance of increasing activity", 0.0, 1.0, step=0.05, key="w_trend", on_change=change_control, args=("w_trend",), disabled=not interactive)
-    st.caption("Recency is separate: this multiplier gives July–December reports extra importance in both crash counts and incident-indicator points.")
-    st.slider("Importance of July–December incidents", 1.0, 5.0, step=0.5, key="recent_weight", on_change=change_control, args=("recent_weight",), disabled=not interactive)
+    st.caption("These controls change ranking priorities; they do not filter out other crash types. Indicators come from reported descriptions, not confirmed injury severity.")
+    st.slider("Give more priority to pedestrian/cyclist and other crash indicators", 0.0, 1.0, step=0.05, key="w_severity", on_change=change_control, args=("w_severity",), disabled=not interactive,
+              help="Higher values give extra importance to pedestrian/cyclist reports, multi-vehicle crashes, and crashes blocking multiple lanes.")
+    st.caption("Higher values give extra importance to pedestrian/cyclist reports, multi-vehicle crashes, and crashes blocking multiple lanes.")
+    st.slider("Give more priority to locations with increasing crashes", 0.0, 1.0, step=0.05, key="w_trend", on_change=change_control, args=("w_trend",), disabled=not interactive,
+              help="Higher values give extra importance to locations with more crashes in July–December than January–June 2025, using (later crashes + 1) / (earlier crashes + 1).")
+    st.caption("Higher values give extra importance to the ratio of July–December to January–June 2025 crashes, using (later crashes + 1) / (earlier crashes + 1).")
+    st.slider("Give more priority to recent crashes", 1.0, 5.0, step=0.5, key="recent_weight", on_change=change_control, args=("recent_weight",), disabled=not interactive,
+              help="Higher values multiply July–December 2025 reports in both crash counts and incident-indicator points for the full-year ranking; January–June reports keep their usual importance.")
+    st.caption("Higher values multiply July–December 2025 reports in both crash counts and incident-indicator points for the full-year ranking. January–June reports keep their usual importance. This is separate from increasing activity.")
     st.caption(f"Current weights: incident indicators {ss.w_severity:.2f}; increasing activity {ss.w_trend:.2f}; recency {ss.recent_weight:g}×.")
     st.button("Test ranking options automatically", on_click=request_tuning, type="primary", disabled=not interactive)
     st.caption("Compares available weight settings using historical validation and selects the strongest result under that test. The search evaluates 20 locations and retains your area, road scope, and recency settings; your displayed capacity stays the same.")
@@ -263,8 +273,6 @@ with st.expander("How we tested the ranking", expanded=False):
         st.markdown(ui.trace(tuned), unsafe_allow_html=True)
     else:
         st.caption("Automatic search has not run in this session. Current weights were supplied directly.")
-with st.expander("Briefing summary", expanded=False):
-    st.markdown(ui.briefing(ui.text_briefing(result), "Every name and number comes from the current shortlist."), unsafe_allow_html=True)
 with st.expander("About the data", expanded=False):
     d = result["dataset"]
     st.markdown(f"{d['rows_loaded']:,} rows loaded, {d['rows_dropped']:,} dropped, {d['rows_used']:,} used. These counts cover the full dataset, before your area and road filters.")

@@ -1,6 +1,6 @@
 # Calgary collision-hotspot shortlist
 
-Ranks Calgary crash locations for City of Calgary Roads by reported harm, not raw count, and tests its own weights against what happened later in the year.
+Shortlists Calgary locations for traffic-safety investigation using reported 2025 crashes. Choose an area, capacity, and priorities, or use the deterministic typed planner. Historical validation and technical weights are available in collapsed sections.
 
 Built for the IEEE YP Industry Hackathon 2026, Energy and Infrastructure Systems, Case 5.
 
@@ -16,8 +16,10 @@ python3.12 -m venv .venv
 .venv/bin/streamlit run app/main.py
 ```
 
-Open `http://localhost:8501`. Browsers only allow the microphone on `localhost` or HTTPS.
+Open `http://localhost:8501`. The opening preset and Reset settings use crash totals, all Calgary, up to 20 locations, and name-based Deerfoot/Stoney exclusion.
 
-Voice input and the spoken briefing use ElevenLabs. Set `ELEVENLABS_API_KEY` in the environment or in `.streamlit/secrets.toml` (gitignored). Without a key, typed planner requests and everything else still work.
+Speech configuration and live testing are deferred. Existing ElevenLabs functions remain available for the later phase, but `SPEECH_ENABLED = False` in `app/main.py` hides speech controls and prevents speech calls even when credentials exist. Typed planning requires no key.
+
+Presets map to `(incident-indicator weight, increasing-activity weight, recency multiplier)`: Crash totals `(0, 0, 1)`, Balanced priorities `(0.5, 0.5, 1)`, Pedestrians and cyclists `(1, 0, 1)`, Recent activity `(0, 0, 2)`. The pedestrian/cyclist preset also weights multi-vehicle and blocked-lane descriptions. The automatic search evaluates 20 locations under the selected area, road scope, and recency; capacity affects the displayed shortlist and its validation, not the search objective. The secondary validation uses overlapping months and is not an independent holdout.
 
 Data: see `data/README.md`.

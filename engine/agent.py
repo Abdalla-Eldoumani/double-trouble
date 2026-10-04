@@ -15,7 +15,7 @@ from engine.score import TOP_N, add_points, baseline, rank, signals
 YEAR = ("2025-01-01", "2026-01-01")
 # Rank on Jan to Aug, score on Sep to Dec.
 TRAIN, TEST = ("2025-01-01", "2025-09-01"), ("2025-09-01", "2026-01-01")
-# A second, independent split to check the chosen weights were not a fluke of the first.
+# A second split, unused by search but with months overlapping the primary evaluation.
 CHECK_TRAIN, CHECK_TEST = ("2025-01-01", "2025-07-01"), ("2025-07-01", "2026-01-01")
 
 GRID = [(s, t) for t in (0.0, 0.5, 1.0) for s in (0.0, 0.25, 0.5, 0.75, 1.0)]
@@ -76,7 +76,7 @@ def backtest(
         later = later[later.index.isin(keep)]
     total = int(later["severity_points"].sum())
     caught = int(later["severity_points"].reindex(top.index, fill_value=0).sum())
-    return caught / total, caught, total
+    return caught / total if total else 0.0, caught, total
 
 
 def _weights(s: float, t: float, exclude: bool) -> dict:
@@ -178,6 +178,10 @@ def run(weights: dict | None = None, tune: bool = True, constraints: dict | None
             "incidents": int(r["incidents"]),
             "severity_points": int(r["severity_points"]),
             "pedestrian_or_cyclist": int(r["pedestrian_or_cyclist"]),
+            "multi_vehicle": int(r["multi_vehicle"]),
+            "multiple_lanes": int(r["multiple_lanes"]),
+            "early": int(r["early"]),
+            "late": int(r["late"]),
             "in_baseline_top20": key in base_top,
             "reason": describe(r),
         })
@@ -185,7 +189,7 @@ def run(weights: dict | None = None, tune: bool = True, constraints: dict | None
     # Movers come from either top 20, so a location that fell off the list can be explained too.
     pool = final.loc[final.index.isin(top.index) | final.index.isin(base_top)]
     change = (pool["baseline_rank"] - pool["rank"]).abs()
-    avg = pool["severity_points"].sum() / pool["incidents"].sum()
+    avg = pool["severity_points"].sum() / pool["incidents"].sum() if pool["incidents"].sum() else 0
     movers = [
         {
             "location_key": key,
@@ -194,12 +198,22 @@ def run(weights: dict | None = None, tune: bool = True, constraints: dict | None
             "from_rank": int(pool.at[key, "baseline_rank"]),
             "to_rank": int(pool.at[key, "rank"]),
             "reason": mover_reason(pool.loc[key], avg, w),
+            # Optional observed signals let the UI explain dropped-out locations too.
+            "incidents": int(pool.at[key, "incidents"]),
+            "pedestrian_or_cyclist": int(pool.at[key, "pedestrian_or_cyclist"]),
+            "multi_vehicle": int(pool.at[key, "multi_vehicle"]),
+            "multiple_lanes": int(pool.at[key, "multiple_lanes"]),
+            "early": int(pool.at[key, "early"]),
+            "late": int(pool.at[key, "late"]),
         }
         for key in change[change > 0].sort_values(ascending=False, kind="stable").index[:3]
     ]
 
     base_share = backtest(df, TRAIN, TEST, count_only, 1.0, keep)[0]
-    agent_share = backtest(df, TRAIN, TEST, w, recent, keep)[0]
+    agent_test = backtest(df, TRAIN, TEST, w, recent, keep)
+    agent_share = agent_test[0]
+    check_base = backtest(df, CHECK_TRAIN, CHECK_TEST, count_only, 1.0, keep)
+    check_agent = backtest(df, CHECK_TRAIN, CHECK_TEST, w, recent, keep)
     n = c["budget"]
     plan_base = backtest(df, TRAIN, TEST, count_only, 1.0, keep, n)
     plan_agent = backtest(df, TRAIN, TEST, w, recent, keep, n)
@@ -222,8 +236,10 @@ def run(weights: dict | None = None, tune: bool = True, constraints: dict | None
             "backtest_baseline": round(base_share, 4),
             "backtest_agent": round(agent_share, 4),
             "check_metric_name": CHECK_METRIC_NAME + (f" in the {c['region']} quadrant" if c["region"] else ""),
-            "check_baseline": round(backtest(df, CHECK_TRAIN, CHECK_TEST, count_only, 1.0, keep)[0], 4),
-            "check_agent": round(backtest(df, CHECK_TRAIN, CHECK_TEST, w, recent, keep)[0], 4),
+            "backtest_points_total": agent_test[2],
+            "check_baseline": round(check_base[0], 4),
+            "check_agent": round(check_agent[0], 4),
+            "check_points_total": check_agent[2],
         },
         "plan": {
             "constraints": c,
