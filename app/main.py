@@ -25,8 +25,8 @@ for presentation_module in (ui, briefing, planning):
 
 st.set_page_config(page_title="Calgary traffic-safety investigations", layout="wide")
 TITLE = ("Where should Calgary focus its next ", "traffic-safety", " investigation?")
-LEDE = ("Use Calgary’s 2025 reported crash incidents to shortlist locations for investigation. "
-        "Choose your area, available investigation capacity, and safety priorities to see where to focus and why.")
+LEDE = ("A shortlist of locations to investigate, built from Calgary’s 2025 reported crash incidents. "
+        "Set your area, capacity and priorities, then see where to focus and why.")
 EXAMPLES = [
     ("Pedestrians and cyclists", "Focus on pedestrians and cyclists."),
     ("Top 10 citywide", "Top 10 across the whole city."),
@@ -159,7 +159,7 @@ try:
         result = get_result(ss.settings["weights"], tune=True, constraints=ss.settings["constraints"])
         ss.tuned = result
         ss.settings = planning.from_result(result)
-        ss.tuning_confirmation = "Ranking options tested. Updated: " + planning.summary(ss.settings) + "."
+        ss.tuning_confirmation = "The agent picked the weights. Updated: " + planning.summary(ss.settings) + "."
     if result is None:
         previous = ss.get("last_result")
         # Theme, focus and export reruns retain the exact applied result (including
@@ -185,10 +185,11 @@ names = briefing.location_names(result)
 st.markdown(ui.hero(TITLE, LEDE, result["dataset"]), unsafe_allow_html=True)
 st.markdown(ui.figures(result), unsafe_allow_html=True)
 st.html(ui.recommendation_link())
+st.markdown(ui.step(1, "Choose what you can investigate"), unsafe_allow_html=True)
 
 controls_col, ask_col = st.columns([1, 1], gap="large")
 with controls_col, st.container(key="controls"):
-    st.markdown(ui.card_head("Plan your investigation"), unsafe_allow_html=True)
+    st.markdown(ui.card_head("Your settings"), unsafe_allow_html=True)
     st.selectbox("Area", list(planning.AREA_OPTIONS), key="area",
                  format_func=planning.AREA_OPTIONS.__getitem__,
                  on_change=change_control, args=("area",), disabled=not interactive)
@@ -200,22 +201,25 @@ with controls_col, st.container(key="controls"):
     st.checkbox("Exclude Deerfoot and Stoney locations", key="exclude_provincial",
                 on_change=change_control, args=("exclude_provincial",), disabled=not interactive,
                 help="Excludes grouped location names containing Deerfoot or Stoney; it does not verify road ownership.")
-    st.button("Reset settings", on_click=submit_example, args=("Reset.",), disabled=not interactive)
-    st.caption("Reset: all Calgary, up to 20 locations, crash totals, Deerfoot and Stoney excluded.")
+    st.button("Let the agent pick the weights", key="agent_pick", on_click=request_tuning, type="primary",
+              width="stretch", disabled=not interactive)
+    st.caption("Tries weight options on earlier 2025 reports for your capacity and keeps the plain crash count unless one does better.")
+    st.button("Reset settings", on_click=submit_example, args=("Reset.",), type="tertiary", disabled=not interactive,
+              help="All Calgary, up to 20 locations, crash totals, Deerfoot and Stoney excluded.")
 with ask_col, st.container(key="planner"):
-    st.markdown(ui.card_head("Ask the planner", "Tell the planner your investigation capacity, area, or safety priorities."), unsafe_allow_html=True)
+    st.markdown(ui.card_head("Or just ask", "Type a capacity, an area or a priority in plain words."), unsafe_allow_html=True)
     with st.form("planner_form", border=False):
         st.text_input("Your planning request", key="planner_text", placeholder=PLACEHOLDER, disabled=not interactive)
         st.form_submit_button("Update recommendations", on_click=submit_typed, type="primary", width="stretch", disabled=not interactive)
-    st.caption("Try a supported request:")
+    st.caption("Examples")
     for label, text in EXAMPLES:
-        st.button(label, on_click=submit_example, args=(text,), key=f"example_{label}", type="tertiary", width="stretch", disabled=not interactive)
+        st.button(label, on_click=submit_example, args=(text,), key=f"example_{label}", type="tertiary", disabled=not interactive)
     if interactive:
         st.toggle("Speak your request", key="voice_open")
         if not speech_key:
-            st.caption("Speech is optional. Add ELEVENLABS_API_KEY to .streamlit/secrets.toml or the environment to enable it. Typed planning works without a key.")
+            st.caption("Speech is optional and needs an ELEVENLABS_API_KEY. Typed planning works without a key.")
         if ss.get("voice_open"):
-            st.caption("Record up to 90 seconds. If the microphone is unavailable, allow microphone access in your browser and use localhost or HTTPS, or type your request.")
+            st.caption("Record up to 90 seconds. No microphone? Allow access in your browser, or type instead.")
             recording = st.audio_input("Record a planning request", key="planner_audio", disabled=not speech_key,
                                        help="Audio is sent to ElevenLabs only when you click Transcribe recording.")
             data = recording.getvalue() if recording is not None else None
@@ -246,7 +250,7 @@ with ask_col, st.container(key="planner"):
             st.text_area("Review transcription", key="voice_transcript", height=100,
                          help="Edit road names or settings before applying. Nothing is applied automatically.")
             st.button("Apply request", on_click=submit_reviewed_voice, width="stretch")
-            st.caption('Supported examples: “Show the top 20 locations in northeast Calgary.” “Give pedestrian and cyclist crashes more importance.” “Exclude Deerfoot and Stoney Trail.” “Now show all Calgary.” “Find the best ranking automatically.”')
+            st.caption('Try: “Top 20 in northeast Calgary.” “Find the best ranking automatically.”')
     if ss.get("reply"):
         st.markdown(ui.reply(ss.reply), unsafe_allow_html=True)
         if ss.reply.get("audio"):
@@ -257,10 +261,10 @@ with ask_col, st.container(key="planner"):
 
 if not interactive:
     st.caption("Sample output: planning controls are unavailable until the engine is connected. These are illustrative recommendations.")
-if ss.get("tuning_confirmation"):
-    st.success(ss.tuning_confirmation)
 where = f"{ui.REGIONS[region]} Calgary" if region else "Calgary"
-st.markdown(ui.section(1, "Recommended locations", f"Up to {budget} locations in {where}."), unsafe_allow_html=True)
+st.markdown(ui.step(2, "Where to investigate", f"Up to {budget} locations in {where}."), unsafe_allow_html=True)
+if ss.get("tuning_confirmation") and result.get("agent_iterations"):
+    st.html(ui.agent_result(result))
 with st.container(key="recommendation_summary"):
     # Dedicated HTML rendering keeps the panel in normal flow and avoids
     # Markdown rewriting its heading/list. Always use the current applied result.
@@ -271,8 +275,8 @@ with st.container(key="recommendation_summary"):
             ss.pop("summary_audio", None)
         if ss.get("speech_error_id") != current_briefing:
             ss.pop("speech_error", None)
-        if st.button("Read summary aloud", key="read_summary", disabled=not speech_key,
-                     help="Generate an optional spoken summary with ElevenLabs. Use the player to listen."):
+        if st.button("Read summary aloud", key="read_summary", disabled=not speech_key, type="tertiary", icon=":material/volume_up:",
+                     help="Optional spoken summary. Needs an ElevenLabs key." if not speech_key else "Generate a spoken summary, then press play."):
             ss.pop("speech_error", None)
             if not ss.get("summary_audio"):
                 with st.spinner("Preparing spoken summary…"):
@@ -284,6 +288,8 @@ with st.container(key="recommendation_summary"):
                         ss.speech_error_id = current_briefing
                     else:
                         ss.summary_audio = {"briefing_id": current_briefing, "bytes": audio}
+        if not speech_key:
+            st.caption("Spoken summary is available with an ElevenLabs key.")
         if ss.get("speech_error"):
             st.warning(ss.speech_error)
         if ss.get("summary_audio"):
@@ -320,28 +326,25 @@ else:
     map_col, list_col = st.columns([1.05, 1], gap="large")
     with map_col:
         st.pydeck_chart(deck, height=520)
-        st.caption("Numbers match the ranked list. Markers use the median reported coordinates of each grouped location.")
+        st.caption("Numbers match the list. Each marker sits at the median reported position of its location.")
     with list_col:
         st.markdown(ui.shortlist(rows, result), unsafe_allow_html=True)
 
-st.markdown(ui.section(2, "Why these locations are priorities", "Reasons for the leading recommendations, based on reported incidents."), unsafe_allow_html=True)
+st.markdown(ui.step(3, "Why these locations are priorities", "The top three, explained from reported incidents."), unsafe_allow_html=True)
 st.markdown(ui.movers(result, lambda k: briefing.display_name(names, k)), unsafe_allow_html=True)
 st.markdown(ui.section(3, "How your priorities affect the recommendations"), unsafe_allow_html=True)
 st.markdown(ui.ranking_changes(result, lambda k: briefing.display_name(names, k)), unsafe_allow_html=True)
 with st.expander("Advanced controls", expanded=False):
-    st.caption("These sliders change ranking priorities; they do not exclude other crash types. Indicators come from incident descriptions, not confirmed injury severity.")
+    st.caption("Sliders change weight; they do not exclude other crash types. Report types come from incident descriptions, not confirmed injury severity.")
     st.slider("Give more priority to pedestrian/cyclist and other crash indicators", 0.0, 1.0, step=0.05, key="w_severity", on_change=change_control, args=("w_severity",), disabled=not interactive,
               help="Higher values give extra importance to pedestrian/cyclist reports, multi-vehicle crashes, and crashes blocking multiple lanes.")
-    st.caption("Higher values give extra importance to pedestrian/cyclist reports, multi-vehicle crashes, and crashes blocking multiple lanes.")
     st.slider("Give more priority to locations with increasing crashes", 0.0, 1.0, step=0.05, key="w_trend", on_change=change_control, args=("w_trend",), disabled=not interactive,
               help="Higher values prioritize the smoothed ratio of July–December to January–June 2025 crash reports.")
-    st.caption("Prioritizes higher July–December activity relative to January–June 2025, with smoothing for small counts.")
     st.slider("Give more priority to recent crashes", 1.0, 5.0, step=0.5, key="recent_weight", on_change=change_control, args=("recent_weight",), disabled=not interactive,
               help="Higher values multiply July–December 2025 reports in both crash counts and incident-indicator points for the full-year ranking; January–June reports keep their usual importance.")
-    st.caption("Multiplies July–December 2025 counts and indicator points. January–June keeps its usual importance.")
-    st.caption(f"Current weights: incident indicators {ss.w_severity:.2f}; increasing activity {ss.w_trend:.2f}; recency {ss.recent_weight:g}×.")
-    st.button("Test ranking options automatically", on_click=request_tuning, type="primary", disabled=not interactive)
-    st.caption("Selects weights using historical reports for your displayed capacity, so a top 5 is tuned as a top 5. Retains your area, road scope and recency. This tuning does not demonstrate crash reduction.")
+    st.caption(f"Current weights: pedestrian, cyclist and incident {ss.w_severity:.2f}; rising crashes {ss.w_trend:.2f}; recency {ss.recent_weight:g}×.")
+    st.button("Test ranking options automatically", on_click=request_tuning, disabled=not interactive)
+    st.caption("Same search as the agent button above. Keeps your area, road scope and recency; it does not show crash reduction.")
 with st.expander("About the data and attribution", expanded=False):
     d = result["dataset"]
     st.markdown(f"{d['rows_loaded']:,} rows loaded, {d['rows_dropped']:,} dropped, {d['rows_used']:,} used. These counts cover the full dataset, before your area and road filters.")
