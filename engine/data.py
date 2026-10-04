@@ -1,6 +1,7 @@
 """Load the Calgary traffic incident feed, drop non-crash rows, assign a location key."""
 
 import html
+import math
 import re
 from pathlib import Path
 
@@ -10,19 +11,21 @@ CSV = Path(__file__).resolve().parent.parent / "data" / "calgary_traffic_inciden
 
 SOURCE = (
     "City of Calgary, Open Calgary Traffic Incidents (2025 subset bundled with IEEE YP "
-    "hackathon Case 5). The City's incident feed, not a complete police collision database. "
+    "hackathon Case 5). The City logs these from traffic camera views; they are unverified, and places "
+    "without cameras are under-counted. It is not a complete police collision database. "
     "Contains information licensed under the Open Government Licence - City of Calgary."
 )
 
 # The first sentence of a description names the event type.
 NON_CRASH = (
-    r"^(?:stalled vehicle|traffic signal|power outage|road work|water main"
-    r"|severe weather|hazardous road|lrt gates)|police|oversized load"
+    r"^(?:stalled vehicle|traffic signal|power outage|road work|water main|severe weather|hazardous road"
+    r"|lrt gates|due to road conditions|road closed|(?:the )?road is closed|the \w+ ramp is closed|cfd )"
+    r"|police|oversized load"
 )
 DROP_REASON = (
     "non-crash rows: the description's first sentence reports a stalled vehicle, a traffic "
     "signal fault or works, a power outage, road work, a water main, weather or a road "
-    "hazard, stuck LRT gates, a police operation or a planned closure"
+    "hazard, stuck LRT gates, a road closure, a fire department call, a police operation or an oversized load"
 )
 
 ABBREVIATIONS = {
@@ -30,9 +33,20 @@ ABBREVIATIONS = {
     "ct": "court", "dr": "drive", "ga": "gate", "gr": "green", "hwy": "highway",
     "ln": "lane", "pl": "place", "py": "parkway", "rd": "road", "st": "street",
     "t": "trail", "tr": "trail", "wy": "way",
+    # Misspellings in the feed, each of which would otherwise start a separate location.
+    "macloed": "macleod", "trai": "trail", "backfoot": "blackfoot", "shaganapi": "shaganappi",
+    "laure": "laurie", "gelnmore": "glenmore", "botton": "bottom", "county": "country",
 }
-# The feed sometimes drops "Trail" from the two provincial freeways.
-SHORT_NAMES = {"deerfoot": "deerfoot trail", "stoney": "stoney trail"}
+SPELLINGS = re.compile(r"\bcal+f+\s?r?o?r?be\b|\bdeer foot\b|\bnose hills\b|\bthe (?=calf robe)")
+SPELLING_FIX = {"deer foot": "deerfoot", "nose hills": "nose hill", "the ": ""}
+# The feed sometimes drops "Trail" from a freeway name.
+SHORT_NAMES = {
+    name: f"{name} trail"
+    for name in ("deerfoot", "stoney", "crowchild", "glenmore", "macleod", "sarcee", "shaganappi", "blackfoot")
+}
+# Two keys with the same streets but a different quadrant tag are one place when their centres
+# are this close; the feed tags crossings of Macleod Trail or Memorial Drive either way.
+SAME_PLACE_METRES = 300
 # "soutbound" is a typo in the feed; ramps and exits belong to the interchange they serve.
 DIRECTION = re.compile(r"\b(?:north|south?|east|west)bound\b|\b(?:exit|ramp)\b")
 # One or more connector words in a row, so "on ramp to" (with "ramp" removed) splits once.
@@ -47,20 +61,63 @@ def normalize(text: pd.Series) -> pd.Series:
     return text.str.lower().str.replace(r"\s+", " ", regex=True).str.strip()
 
 
+def _streets(info: str) -> tuple[list[str], str]:
+    """Street names in the order the feed wrote them, direction words removed, and the quadrant."""
+    s = re.sub(r"\band(?=\d)", "and ", html.unescape(info).lower())  # "and17 avenue"
+    s = DIRECTION.sub("", " ".join(s.split())).strip()
+    s = SPELLINGS.sub(lambda m: SPELLING_FIX.get(m.group(0), "calf robe"), s)
+    m = QUADRANT.search(s)
+    s = QUADRANT.sub("", s)
+    parts = [QUADRANT.sub("", part) for part in CONNECTOR.split(s)]  # "39 avenue ne & 32 street"
+    streets = [" ".join(ABBREVIATIONS.get(w, w) for w in part.split()) for part in parts if part.strip()]
+    streets = [SHORT_NAMES.get(st, st) for st in streets]
+    return list(dict.fromkeys(streets)), m.group(1) if m else ""
+
+
 def location_key(info: str) -> str:
     """'Northbound Deerfoot Trail approaching Glenmore Trail SE' -> 'deerfoot trail & glenmore trail se'.
 
     Street order is sorted so 'A and B' and 'B and A' are one intersection. The quadrant
     stays in the key because 17 Avenue and 36 Street exists in both SE and SW.
     """
-    s = re.sub(r"\band(?=\d)", "and ", html.unescape(info).lower())  # "and17 avenue"
-    s = DIRECTION.sub("", " ".join(s.split())).strip()
-    m = QUADRANT.search(s)
-    s = QUADRANT.sub("", s)
-    parts = [QUADRANT.sub("", part) for part in CONNECTOR.split(s)]  # "39 avenue ne & 32 street"
-    streets = {" ".join(ABBREVIATIONS.get(w, w) for w in part.split()) for part in parts if part.strip()}
-    streets = {SHORT_NAMES.get(st, st) for st in streets}
-    return " & ".join(sorted(streets)) + (f" {m.group(1)}" if m else "")
+    streets, quadrant = _streets(info)
+    return " & ".join(sorted(streets)) + (f" {quadrant}" if quadrant else "")
+
+
+def _title(word: str) -> str:
+    if word.startswith("mc") and len(word) > 2:
+        return "Mc" + word[2:].capitalize()
+    return "-".join(p.capitalize() for p in word.split("-"))
+
+
+def location_name(info: str) -> str:
+    """'Eastbound Glenmore Trail after Crowchild Trail SW' -> 'Glenmore Trail and Crowchild Trail SW'.
+
+    A location groups every approach, so the name drops the direction a single report came from.
+    """
+    streets, quadrant = _streets(info)
+    name = " and ".join(" ".join(_title(w) for w in st.split()) for st in streets)
+    return f"{name} {quadrant.upper()}".strip()
+
+
+def merge_quadrant_variants(df: pd.DataFrame) -> pd.Series:
+    """Fold 'a & b s' into 'a & b sw' when both are the same place on the map.
+
+    The variant with the most incidents keeps its key; the others join it only if their median
+    position is within SAME_PLACE_METRES, so 17 Avenue and 36 Street SE and SW stay apart.
+    """
+    keys = df["location_key"]
+    centre = df.groupby("location_key").agg(
+        lat=("latitude", "median"), lon=("longitude", "median"), n=("latitude", "size"))
+    centre["core"] = centre.index.str.replace(QUADRANT, "", regex=True)
+    rename = {}
+    for _, group in centre[centre["core"].duplicated(keep=False)].groupby("core"):
+        main = group["n"].idxmax()
+        dy = (group["lat"] - group.at[main, "lat"]) * 111_320
+        dx = (group["lon"] - group.at[main, "lon"]) * 111_320 * math.cos(math.radians(group.at[main, "lat"]))
+        near = group.index[((dx**2 + dy**2) ** 0.5 <= SAME_PLACE_METRES) & (group.index != main)]
+        rename.update({k: main for k in near})
+    return keys.replace(rename)
 
 
 def load(path: Path = CSV) -> tuple[pd.DataFrame, dict]:
@@ -80,7 +137,8 @@ def load(path: Path = CSV) -> tuple[pd.DataFrame, dict]:
         name=located["incident_info"].str.strip(),
         start_dt=pd.to_datetime(located["start_dt"][~drop]),
     )
-    df["location_key"] = df["name"].map(location_key)
+    df["location_key"] = merge_quadrant_variants(df.assign(location_key=df["name"].map(location_key)))
+    df["display_name"] = df["name"].map(location_name)
 
     info = {
         "source": SOURCE,
