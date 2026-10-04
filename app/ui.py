@@ -126,7 +126,8 @@ def summary_reason(row, result):
     return f"{row['incidents']} reported crashes; selected by total crash reports."
 
 
-def recommendation_summary(result):
+def summary_details(result):
+    """Shared applied area, priorities, road scope and rows for text and speech."""
     from app import planning
 
     settings = planning.from_result(result)
@@ -134,12 +135,19 @@ def recommendation_summary(result):
     rows = recommended_rows(result)
     area = f"{REGIONS[c['region']]} Calgary" if c["region"] else "All Calgary"
     road_scope = "Deerfoot and Stoney excluded by location name" if w["exclude_provincial"] else "Deerfoot and Stoney included"
+    return {"area": area, "rows": rows, "road_scope": road_scope,
+            "priorities": planning.priority_description(settings), "settings": settings}
+
+
+def recommendation_summary(result):
+    details = summary_details(result)
+    rows, area, road_scope = details["rows"], details["area"], details["road_scope"]
     overview = f"{len(rows)} locations recommended in {area} · {road_scope}."
     items = "".join(f'<li><b>{esc(r["name"])}</b> — {esc(summary_reason(r, result))}</li>' for r in rows[:3])
     body = f'<ul>{items}</ul>' if rows else '<p>No locations qualify for the applied area and road scope.</p>'
     return ('<div class="dt recommendation-summary" role="region" aria-label="Recommendation summary">'
             '<h3 id="recommendation-summary">Recommendation summary</h3>'
-            f'<p>{esc(overview)}</p><p>Applied priorities: {esc(planning.priority_description(settings))}.</p>'
+            f'<p>{esc(overview)}</p><p>Applied priorities: {esc(details["priorities"])}.</p>'
             f'{body}<div class="summary-note">Location counts cover January–December 2025. '
             'The crash total above covers the full cleaned dataset, before area and road filters.</div></div>')
 

@@ -84,8 +84,8 @@ def test_tune_respects_the_provincial_checkbox():
 def test_typed_ui_never_invokes_speech_when_a_key_is_set(monkeypatch):
     monkeypatch.setenv("ELEVENLABS_API_KEY", "test-key-not-real")
     def forbidden(*args, **kwargs):
-        pytest.fail("UI phase must not invoke speech or inspect credentials")
-    for name in ("api_key", "synthesize", "transcribe"):
+        pytest.fail("Typed planning and ordinary reruns must not invoke speech")
+    for name in ("synthesize", "transcribe"):
         monkeypatch.setattr(briefing, name, forbidden)
     at = run_app()
     reply = ask(at, EXAMPLE)
@@ -106,10 +106,20 @@ def test_transcribe_sends_audio_to_scribe(monkeypatch):
             return type("Transcript", (), {"text": "  only show northwest Calgary  "})()
 
     class FakeClient:
-        def __init__(self, api_key):
+        def __init__(self, api_key, timeout):
             self.speech_to_text = FakeSTT()
 
     monkeypatch.setattr("elevenlabs.client.ElevenLabs", FakeClient)
-    audio = ("request.wav", b"RIFF", "audio/wav")
+    import io
+    import wave
+    data = io.BytesIO()
+    with wave.open(data, "wb") as recording:
+        recording.setnchannels(1)
+        recording.setsampwidth(2)
+        recording.setframerate(16000)
+        recording.writeframes(b"\x01\x00" * 3200)
+    audio = ("request.wav", data.getvalue(), "audio/wav")
     assert briefing.transcribe(audio, "test-key-not-real") == "only show northwest Calgary"
-    assert sent == [{"file": audio, "model_id": briefing.STT_MODEL_ID}]
+    assert sent == [{"file": audio, "model_id": briefing.STT_MODEL_ID, "language_code": "eng",
+                     "tag_audio_events": False, "diarize": False,
+                     "request_options": {"max_retries": 0, "timeout_in_seconds": 30}}]

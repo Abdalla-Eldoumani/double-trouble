@@ -136,14 +136,14 @@ def test_briefing_uses_only_result_values():
     script = briefing.build_script(FIXTURE)
     body = script.replace(briefing.FOOTER, "")
     assert {n.replace(",", "") for n in re.findall(NUMBER, body)} <= numbers_in(FIXTURE)
-    for row in sorted(FIXTURE["top20"], key=lambda r: r["rank"])[:5]:
-        assert row["name"] in script
+    first = min(FIXTURE["top20"], key=lambda r: r["rank"])
+    assert briefing.spoken_name(first["name"]) in script
 
     changed = copy.deepcopy(FIXTURE)
     first = min(changed["top20"], key=lambda r: r["rank"])
     first["name"], first["incidents"] = "Test Street and Other Road", 4321
     changed_script = briefing.build_script(changed)
-    assert "Test Street and Other Road, 4321 incidents" in changed_script
+    assert "Test Street and Other Road: 4321 reported crashes" in changed_script
 
 
 def test_display_name_prefers_result_name_then_tidies_key():

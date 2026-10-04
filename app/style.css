@@ -63,10 +63,13 @@ header[data-testid="stHeader"], [data-testid="stToolbar"], [data-testid="stDecor
 .stApp [data-testid="stToggle"] label p { color: var(--ink); font-family: var(--sans); }
 .stApp [data-testid="stCaptionContainer"] { opacity: 1; }
 .stApp [data-testid="stCaptionContainer"] p { color: var(--ink-soft); font: 400 .88rem/1.5 var(--sans); }
-.stApp [data-testid="stTextInputRootElement"], .stApp [data-testid="stNumberInputContainer"],
+.stApp [data-testid="stTextInputRootElement"], .stApp [data-testid="stTextAreaRootElement"], .stApp [data-testid="stNumberInputContainer"],
 .stApp [data-baseweb="select"] > div { background: var(--card); color: var(--ink); border-color: var(--rule); }
-.stApp input { color: var(--ink); background: var(--card); caret-color: var(--ink); font-family: var(--sans); }
-.stApp input::placeholder { color: var(--ink-soft); opacity: 1; }
+.stApp input, .stApp textarea { color: var(--ink); background: var(--card); caret-color: var(--ink); font-family: var(--sans); }
+.stApp input::placeholder, .stApp textarea::placeholder { color: var(--ink-soft); opacity: 1; }
+.stApp [data-testid="stAudioInput"] > div { background: var(--card); color: var(--ink); border: 1px solid var(--rule); }
+.stApp [data-testid="stAudioInputActionButton"] { color: var(--ink); }
+.stApp [data-testid="stAudioInputWaveformTimeCode"] { color: var(--ink-soft); background: var(--card); }
 .stApp [data-baseweb="select"] svg { fill: var(--ink-soft); }
 .stApp [data-testid="stSelectbox"] [role="group"] { background: var(--card); border-color: var(--rule); }
 .stApp [data-testid="stSelectbox"] button { background: var(--card); color: var(--ink-soft); }
@@ -96,7 +99,7 @@ header[data-testid="stHeader"], [data-testid="stToolbar"], [data-testid="stDecor
   background: var(--signal); border-color: var(--signal); color: var(--paper); }
 .stApp button:hover { border-color: var(--signal); }
 .stApp button:disabled { opacity: .55; }
-.stApp button:focus-visible, .stApp input:focus-visible,
+.stApp button:focus-visible, .stApp input:focus-visible, .stApp textarea:focus-visible,
 .stApp [data-baseweb="select"]:focus-within { outline: 2px solid var(--signal); outline-offset: 2px; }
 .stApp [data-testid="stExpander"] { background: var(--card); border-color: var(--rule); border-radius: 6px; margin-top: .8rem; color: var(--ink); }
 .stApp [data-testid="stExpander"] summary { background: var(--card); color: var(--ink); }

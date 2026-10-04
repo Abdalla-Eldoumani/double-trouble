@@ -18,7 +18,29 @@ python3.12 -m venv .venv
 
 Open `http://localhost:8501`. The opening preset and Reset settings use crash totals, all Calgary, up to 20 locations, and name-based Deerfoot/Stoney exclusion. The CLI command above runs the automatic weight search; the app starts with the count-only preset.
 
-Speech configuration and live testing are deferred. Existing ElevenLabs functions remain available for the later phase, but `SPEECH_ENABLED = False` in `app/main.py` hides speech controls and prevents speech calls even when credentials exist. Typed planning requires no key.
+## Optional ElevenLabs speech
+
+Create **`.streamlit/secrets.toml`** in the repository and paste your key there:
+
+```toml
+ELEVENLABS_API_KEY = "paste-your-key-here"
+```
+
+Use `.streamlit/secrets.toml.example` as a reference; preserve any existing entries in your secrets file. The real file and local `.env` files are ignored by Git. Alternatively, set `ELEVENLABS_API_KEY` in the environment that launches Streamlit; it takes precedence over the secrets file. `.env` files are not loaded automatically. Never paste your key into chat or commit it.
+
+Launch from the repository root:
+
+```bash
+.venv/bin/streamlit run app/main.py
+```
+
+In **Ask the planner**, turn on **Speak your request**, record a short request, and click **Transcribe recording**. Review and edit **Review transcription**, then click **Apply request**. The same offline planner handles both speech transcripts and typed requests, retaining settings you do not mention. Supported requests include “Show the top 20 locations in northeast Calgary,” “Give pedestrian and cyclist crashes more importance,” “Exclude Deerfoot and Stoney Trail,” “Now show all Calgary,” and “Find the best ranking automatically.” Unsupported requests leave settings unchanged; this is a rule-based planner, not a general conversational assistant.
+
+Beside the visible recommendation summary, click **Read summary aloud**, then press play in the audio player. Audio describes the current investigation recommendations; changing recommendations removes old audio. Theme changes preserve the transcript and current audio. No recording, transcription, synthesis, or playback happens automatically. Transcription and speech generation send audio or briefing text to ElevenLabs only when requested and may use your account's credits.
+
+Optional environment variables or secrets entries: `ELEVENLABS_VOICE_ID` (default George, `JBFqnCBsd6RMkjVDRZzb`), `ELEVENLABS_STT_MODEL_ID` (default `scribe_v2`), and `ELEVENLABS_TTS_MODEL_ID` (default `eleven_multilingual_v2`). Use models and a voice available to your account; no separate settings screen is needed.
+
+If speech is disabled, check the key's spelling and restart Streamlit after adding secrets or changing its environment. If the microphone is unavailable, allow microphone access in your browser and use localhost or HTTPS; typed planning remains available. Keep recordings under 90 seconds. For empty transcripts, record clear speech and retry. For authorization, quota, connection, or voice/model errors, check your ElevenLabs account/configuration and retry deliberately. Requests have 30-second network timeouts and no automatic retries. See [the integration report](docs/ELEVENLABS_INTEGRATION_REPORT.md) for mocked verification and a first-live-test checklist.
 
 ## Data and ranking
 

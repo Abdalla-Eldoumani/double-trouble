@@ -1,11 +1,26 @@
+"""Explicit-action speech helpers. Credentials and audio never enter shared caches."""
+import hashlib
+import io
+import json
 import os
+import re
+import time
+import wave
 
 import streamlit as st
 
 FOOTER = "A shortlist for investigation, based on reported crashes in 2025. It does not predict or prevent crashes."
 VOICE_ID = "JBFqnCBsd6RMkjVDRZzb"
 MODEL_ID = "eleven_multilingual_v2"
+STT_MODEL_ID = "scribe_v2"
 QUADRANTS = {"nw", "ne", "sw", "se"}
+REQUEST_TIMEOUT = 30
+REQUEST_OPTIONS = {"timeout_in_seconds": REQUEST_TIMEOUT, "max_retries": 0}
+MAX_RECORDING_SECONDS = 90
+
+
+class SpeechError(Exception):
+    """Only safe, user-facing messages; never propagate an SDK response body."""
 
 
 def location_names(result):
@@ -16,68 +31,153 @@ def location_names(result):
 
 
 def display_name(names, key):
-    # Locations outside the harm top 20 carry only their key, which is the lowercased name.
     if key in names:
         return names[key]
     return " ".join(w.upper() if w in QUADRANTS else w.capitalize() for w in key.split())
 
 
+def spoken_name(name):
+    quadrants = {"NW": "northwest", "NE": "northeast", "SW": "southwest", "SE": "southeast"}
+    name = name.replace("&", "and")
+    return re.sub(r"\b(NW|NE|SW|SE)\b", lambda m: quadrants[m[0]], name)
+
+
 def build_script(result):
-    names = location_names(result)
-    data = result["dataset"]
-    lines = [
-        "Morning safety briefing.",
-        f"{data['rows_used']:,} reported crashes, " + (
-            "ranked by harm." if any(result["weights"][k] for k in ("w_severity", "w_trend"))
-            else "ranked by crash count."),
-        "The top five:",
-    ]
-    for r in sorted(result["top20"], key=lambda r: r["rank"])[:5]:
-        line = f"Number {r['rank']}, {r['name']}, {r['incidents']} incidents"
-        if r["pedestrian_or_cyclist"]:
-            line += f", {r['pedestrian_or_cyclist']} involving a pedestrian or cyclist"
-        lines.append(line + ".")
-    if result["movers"]:
-        lines.append("Biggest changes against a count-only list:")
-    # Reasons stay on screen; read aloud they push the briefing well past 40 seconds.
-    for m in result["movers"]:
-        name = display_name(names, m["location_key"])
-        lines.append(f"{name}, {m['direction']} from {m['from_rank']} to {m['to_rank']}.")
-    lines.append(FOOTER)
+    """About 20–40 seconds: applied scope and up to three factual leading reasons."""
+    from app import ui
+
+    details = ui.summary_details(result)
+    rows = details["rows"]
+    w, c = details["settings"]["weights"], details["settings"]["constraints"]
+    priorities = ["crash totals"]
+    if w["w_severity"]:
+        priorities.append("pedestrian, cyclist, multi-vehicle and blocked-lane reports")
+    if w["w_trend"]:
+        priorities.append("increasing crash activity")
+    if c["recent_weight"] != 1:
+        priorities.append(f"July to December reports weighted {c['recent_weight']:g} times")
+    lines = [f"For {details['area']}, {len(rows)} locations are recommended for investigation, based on reported 2025 crashes.",
+             "Priorities: " + ", ".join(priorities) + ".",
+             details["road_scope"] + "."]
+    if not rows:
+        lines.append("No locations qualify. Try another area or change the road exclusions.")
+    for row in rows[:3]:
+        reason = f"{row['incidents']} reported crashes"
+        if w["w_severity"]:
+            reason += f", including {row['pedestrian_or_cyclist']} involving pedestrians or cyclists"
+        elif (w["w_trend"] or c["recent_weight"] != 1) and "late" in row:
+            reason += f", with {row['late']} in July to December"
+        line = f"{spoken_name(row['name'])}: {reason}."
+        # Long corridor names and custom priorities can otherwise exceed 40s.
+        if len((" ".join(lines) + " " + line).split()) > 105 and len(lines) > 3:
+            break
+        lines.append(line)
     return " ".join(lines)
 
 
-def api_key():
-    key = os.environ.get("ELEVENLABS_API_KEY")
-    if key:
-        return key
+def setting(name, default=None):
+    value = os.environ.get(name)
+    if value and value.strip():
+        return value.strip()
     try:
-        return st.secrets.get("ELEVENLABS_API_KEY")
+        value = st.secrets.get(name)
     except Exception:
-        # No secrets file is a normal state locally; the caller hides the button.
-        return None
+        # Missing or invalid local secrets must never break offline planning.
+        return default
+    return value.strip() if isinstance(value, str) and value.strip() else default
 
 
-STT_MODEL_ID = "scribe_v2"
+def api_key():
+    key = setting("ELEVENLABS_API_KEY")
+    return None if key == "paste-your-key-here" else key
 
 
-def transcribe(audio, key):
-    """Speech to text for a recorded planner request."""
+def speech_config():
+    return {"voice_id": setting("ELEVENLABS_VOICE_ID", VOICE_ID),
+            "tts_model": setting("ELEVENLABS_TTS_MODEL_ID", MODEL_ID),
+            "stt_model": setting("ELEVENLABS_STT_MODEL_ID", STT_MODEL_ID)}
+
+
+def _client(key):
+    if not key:
+        raise SpeechError("Add ELEVENLABS_API_KEY to .streamlit/secrets.toml or the environment to enable speech.")
     from elevenlabs.client import ElevenLabs
-
-    client = ElevenLabs(api_key=key)
-    return client.speech_to_text.convert(file=audio, model_id=STT_MODEL_ID).text.strip()
+    return ElevenLabs(api_key=key, timeout=REQUEST_TIMEOUT)
 
 
-@st.cache_data(show_spinner="Generating audio...")
-def synthesize(script, _key):
-    from elevenlabs.client import ElevenLabs
+def _failure(exc, action):
+    status = getattr(exc, "status_code", None)
+    if status in (401, 403):
+        return f"{action} was not authorized. Check your local API key and speech permissions."
+    if status == 429:
+        return f"{action} is unavailable due to quota or rate limits. Check your ElevenLabs account, then retry."
+    return f"{action} failed or timed out. Check your connection and voice/model configuration, then retry."
 
-    client = ElevenLabs(api_key=_key)
-    audio = client.text_to_speech.convert(
-        voice_id=VOICE_ID,
-        text=script,
-        model_id=MODEL_ID,
-        output_format="mp3_44100_128",
-    )
-    return b"".join(audio)
+
+def recording_id(data, model):
+    return hashlib.sha256(model.encode() + b"\0" + data).hexdigest()
+
+
+def validate_recording(data):
+    if not isinstance(data, bytes) or not data or len(data) > 10_000_000:
+        raise SpeechError("The recording is empty or too large. Record a short request and try again.")
+    try:
+        with wave.open(io.BytesIO(data), "rb") as audio:
+            seconds = audio.getnframes() / audio.getframerate()
+            frames = audio.readframes(audio.getnframes())
+            if not frames or seconds < 0.1:
+                raise SpeechError("The recording is too short or empty. Record a spoken request and try again.")
+            if seconds > MAX_RECORDING_SECONDS:
+                raise SpeechError("Keep recordings under 90 seconds, then try again.")
+    except (wave.Error, EOFError, ValueError, ZeroDivisionError):
+        raise SpeechError("The recording could not be read. Record it again using the microphone control.") from None
+
+
+def transcribe(audio, key, model_id=None):
+    """One bounded batch request; Streamlit's recorder supplies in-memory WAV."""
+    data = audio[1] if isinstance(audio, tuple) else audio
+    validate_recording(data)
+    try:
+        response = _client(key).speech_to_text.convert(
+            file=("request.wav", data, "audio/wav"),
+            model_id=model_id or STT_MODEL_ID, language_code="eng",
+            tag_audio_events=False, diarize=False, request_options=dict(REQUEST_OPTIONS),
+        )
+        text = getattr(response, "text", None)
+        if not isinstance(text, str) or not text.strip():
+            raise SpeechError("No speech was transcribed. Record a clear spoken request and try again.")
+        return text.strip()
+    except SpeechError:
+        raise
+    except Exception as exc:
+        raise SpeechError(_failure(exc, "Transcription")) from None
+
+
+def synthesize(script, key, voice_id=None, model_id=None):
+    """Collect the SDK's MP3 byte iterator. No global audio cache or auto playback."""
+    started = time.monotonic()
+    try:
+        chunks = _client(key).text_to_speech.convert(
+            voice_id=voice_id or VOICE_ID, text=script, model_id=model_id or MODEL_ID,
+            output_format="mp3_44100_128", request_options=dict(REQUEST_OPTIONS),
+        )
+        audio = bytearray()
+        for chunk in chunks:
+            if time.monotonic() - started > REQUEST_TIMEOUT or len(audio) > 5_000_000:
+                raise SpeechError("Reading the summary timed out. Please retry.")
+            audio.extend(chunk)
+        if not audio:
+            raise SpeechError("No summary audio was returned. Please retry.")
+        return bytes(audio)
+    except SpeechError:
+        raise
+    except Exception as exc:
+        raise SpeechError(_failure(exc, "Reading the summary")) from None
+
+
+def briefing_id(result, config):
+    """Invalidate even when a changed recommendation falls outside the spoken top three."""
+    from app import ui
+    payload = {"settings": ui.summary_details(result)["settings"],
+               "rows": ui.recommended_rows(result), "config": config}
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()

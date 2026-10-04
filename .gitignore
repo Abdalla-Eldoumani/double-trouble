@@ -3,5 +3,10 @@ __pycache__/
 .venv/
 out/
 .env
+.env.*
+!.env.example
+*.env
+*.env.*
+!*.env.example
 .streamlit/secrets.toml
 .DS_Store

@@ -22,7 +22,7 @@ REGION_NAMES = {"NE": "northeast", "NW": "northwest", "SE": "southeast", "SW": "
 REGION_PATTERNS = {
     code: rf"\b(?:{name[:5]}[\s-]?{name[5:]}|{code.lower()})\b" for code, name in REGION_NAMES.items()
 }
-CITYWIDE = r"\b(?:all of calgary|whole city|entire city|city[\s-]?wide|every quadrant|all quadrants|everywhere)\b"
+CITYWIDE = r"\b(?:all (?:of )?calgary|whole city|entire city|city[\s-]?wide|every quadrant|all quadrants|everywhere)\b"
 BUDGET = (
     r"\b(?:top|only|just|budget (?:of|for)|investigate|visit|fix|afford|study|handle|look at|pick)"
     r"\s+(?:the\s+)?(?:top\s+)?(\d{1,2}|" + "|".join(NUMBER_WORDS) + r")\b"
@@ -32,7 +32,7 @@ SEVERITY_ON = r"\b(?:pedestrian|cyclist|vulnerable|severity|severe|harm|injur\w*
 SEVERITY_OFF = r"\b(?:count only|just count|raw count|ignore severity|crash count only|only the count)\b"
 PROVINCIAL_IN = r"\b(?:include|add|show|with)\s+(?:the\s+)?(?:provincial|highways?|deerfoot|stoney)"
 PROVINCIAL_OUT = r"\b(?:exclude|without|drop|remove|hide|no)\s+(?:the\s+)?(?:provincial|highways?|deerfoot|stoney)|city roads only"
-TUNE = r"\b(?:tune|optimi[sz]e|best weights|you (?:choose|pick|decide))\b"
+TUNE = r"\b(?:tune|optimi[sz]e|best weights|best ranking automatically|you (?:choose|pick|decide))\b"
 RESET = r"\b(?:reset|start over|clear (?:everything|all|settings))\b"
 
 

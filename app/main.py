@@ -14,18 +14,16 @@ from app import briefing, export, planning, ui
 from app.load import ResultShapeError, consistency_warnings, get_result
 
 # A long-lived Streamlit process can rerun this script while retaining an older
-# imported presentation module. Refresh only that module when its source changes;
+# imported presentation/speech modules. Refresh those when their source changes;
 # session settings, cached results, and the ranking engine stay intact.
-ui_source = Path(ui.__file__).resolve()
-ui_mtime = ui_source.stat().st_mtime_ns
-if getattr(ui, "_source_mtime_ns", None) != ui_mtime:
-    from importlib import reload
-    reload(ui)
-    ui._source_mtime_ns = ui_mtime
+for presentation_module in (ui, briefing):
+    source_mtime = Path(presentation_module.__file__).resolve().stat().st_mtime_ns
+    if getattr(presentation_module, "_source_mtime_ns", None) != source_mtime:
+        from importlib import reload
+        reload(presentation_module)
+        presentation_module._source_mtime_ns = source_mtime
 
 st.set_page_config(page_title="Calgary traffic-safety investigations", layout="wide")
-# Speech is a later project phase. Environment credentials alone never enable it.
-SPEECH_ENABLED = False
 TITLE = ("Where should Calgary focus its next ", "traffic-safety", " investigation?")
 LEDE = ("Use Calgary’s 2025 reported crash incidents to shortlist locations for investigation. "
         "Choose your area, available investigation capacity, and safety priorities to see where to focus and why.")
@@ -36,6 +34,9 @@ EXAMPLES = [
 ]
 PLACEHOLDER = "We can investigate five locations in northwest Calgary. Give recent crashes twice the importance."
 ss = st.session_state
+# Retain reviewed text even when the compact voice option is closed and its
+# widget is temporarily absent. Theme reruns must never erase that draft.
+ss.voice_transcript = ss.get("voice_transcript", "")
 
 
 def clear_confirmation():
@@ -82,21 +83,13 @@ def submit_example(text):
     ss.pending_request = text
 
 
-def submit_voice():
-    # Preserve the integration hook; direct callbacks also respect the UI-phase gate.
-    if not SPEECH_ENABLED:
-        return
-    audio = ss.get("planner_audio")
-    if audio is None:
-        return
-    try:
-        text = briefing.transcribe(("request.wav", audio.getvalue(), "audio/wav"), briefing.api_key())
-    except Exception as exc:
-        ss.planner_error = f"Speech to text failed ({type(exc).__name__}). Type the request instead."
-        return
+def submit_reviewed_voice():
+    text = ss.get("voice_transcript", "").strip()
     if text:
-        ss.planner_text = text
+        ss.pop("transcription_error", None)
         ss.pending_request = text
+    else:
+        ss.transcription_error = "Enter or transcribe a request before applying it."
 
 
 def apply_request(text):
@@ -124,14 +117,6 @@ def apply_request(text):
     )}
     if result.get("plan"):
         reply["comparison"] = compare(previous, result)
-    if SPEECH_ENABLED:
-        key = briefing.api_key()
-        if key:
-            try:
-                reply["audio"] = briefing.synthesize(reply["text"], key)
-                reply["fresh"] = True
-            except Exception as exc:
-                reply["audio_error"] = f"Audio failed ({type(exc).__name__})."
     ss.reply = reply
     return result
 
@@ -176,6 +161,8 @@ for problem in consistency_warnings(result):
     st.warning(f"Result check: {problem}")
 plan = result.get("plan")
 interactive = bool(plan)
+speech_key = briefing.api_key() if interactive else None
+speech_config = briefing.speech_config() if interactive else None
 rows = ui.recommended_rows(result)
 budget = plan["constraints"]["budget"] if plan else len(rows)
 region = plan["constraints"]["region"] if plan else None
@@ -202,18 +189,51 @@ with controls_col, st.container(key="controls"):
     st.caption("Reset: all Calgary, up to 20 locations, crash totals, Deerfoot and Stoney excluded.")
 with ask_col, st.container(key="planner"):
     st.markdown(ui.card_head("Ask the planner", "Tell the planner your investigation capacity, area, or safety priorities."), unsafe_allow_html=True)
-    if SPEECH_ENABLED and briefing.api_key():
-        st.audio_input("Speak a request", key="planner_audio", on_change=submit_voice)
     with st.form("planner_form", border=False):
         st.text_input("Your planning request", key="planner_text", placeholder=PLACEHOLDER, disabled=not interactive)
         st.form_submit_button("Update recommendations", on_click=submit_typed, type="primary", width="stretch", disabled=not interactive)
     st.caption("Try a supported request:")
     for label, text in EXAMPLES:
         st.button(label, on_click=submit_example, args=(text,), key=f"example_{label}", type="tertiary", width="stretch", disabled=not interactive)
+    if interactive:
+        st.toggle("Speak your request", key="voice_open")
+        if not speech_key:
+            st.caption("Speech is optional. Add ELEVENLABS_API_KEY to .streamlit/secrets.toml or the environment to enable it. Typed planning works without a key.")
+        if ss.get("voice_open"):
+            st.caption("Record up to 90 seconds. If the microphone is unavailable, allow microphone access in your browser and use localhost or HTTPS, or type your request.")
+            recording = st.audio_input("Record a planning request", key="planner_audio", disabled=not speech_key,
+                                       help="Audio is sent to ElevenLabs only when you click Transcribe recording.")
+            data = recording.getvalue() if recording is not None else None
+            recording_key = briefing.recording_id(data, speech_config["stt_model"]) if data is not None else None
+            completed = ss.get("completed_transcription", {})
+            if recording_key != ss.get("recording_seen"):
+                ss.recording_seen = recording_key
+                ss.pop("transcription_error", None)
+                if recording_key is not None:
+                    ss.voice_transcript = completed.get("text", "") if completed.get("recording_id") == recording_key else ""
+            already_transcribed = recording_key is not None and completed.get("recording_id") == recording_key
+            if st.button("Transcribe recording", key="transcribe_recording", disabled=not speech_key or data is None or already_transcribed) and not already_transcribed:
+                ss.pop("transcription_error", None)
+                with st.spinner("Transcribing recording…"):
+                    try:
+                        transcript = briefing.transcribe(data, speech_key, model_id=speech_config["stt_model"])
+                    except briefing.SpeechError as exc:
+                        ss.transcription_error = str(exc)
+                    else:
+                        ss.voice_transcript = transcript
+                        ss.completed_transcription = {"recording_id": recording_key, "text": transcript}
+            if ss.get("transcription_error"):
+                st.warning(ss.transcription_error)
+            if already_transcribed:
+                st.caption("This recording is transcribed. Review or edit the text, then apply it.")
+            # Outside a form so edited text is retained on focus/theme reruns.
+            # Applying is still a separate, explicit planner action.
+            st.text_area("Review transcription", key="voice_transcript", height=100,
+                         help="Edit road names or settings before applying. Nothing is applied automatically.")
+            st.button("Apply request", on_click=submit_reviewed_voice, width="stretch")
+            st.caption('Supported examples: “Show the top 20 locations in northeast Calgary.” “Give pedestrian and cyclist crashes more importance.” “Exclude Deerfoot and Stoney Trail.” “Now show all Calgary.” “Find the best ranking automatically.”')
     if ss.get("reply"):
         st.markdown(ui.reply(ss.reply), unsafe_allow_html=True)
-        if SPEECH_ENABLED and ss.reply.get("audio"):
-            st.audio(ss.reply["audio"], format="audio/mpeg", autoplay=ss.reply.pop("fresh", False))
 
 if not interactive:
     st.caption("Sample output: planning controls are unavailable until the engine is connected. These are illustrative recommendations.")
@@ -225,6 +245,30 @@ with st.container(key="recommendation_summary"):
     # Dedicated HTML rendering keeps the panel in normal flow and avoids
     # Markdown rewriting its heading/list. Always use the current applied result.
     st.html(ui.recommendation_summary(result))
+    if interactive:
+        current_briefing = briefing.briefing_id(result, speech_config)
+        if ss.get("summary_audio", {}).get("briefing_id") != current_briefing:
+            ss.pop("summary_audio", None)
+        if ss.get("speech_error_id") != current_briefing:
+            ss.pop("speech_error", None)
+        if st.button("Read summary aloud", key="read_summary", disabled=not speech_key,
+                     help="Generate an optional spoken summary with ElevenLabs. Use the player to listen."):
+            ss.pop("speech_error", None)
+            if not ss.get("summary_audio"):
+                with st.spinner("Preparing spoken summary…"):
+                    try:
+                        audio = briefing.synthesize(briefing.build_script(result), speech_key,
+                                                   voice_id=speech_config["voice_id"], model_id=speech_config["tts_model"])
+                    except briefing.SpeechError as exc:
+                        ss.speech_error = str(exc)
+                        ss.speech_error_id = current_briefing
+                    else:
+                        ss.summary_audio = {"briefing_id": current_briefing, "bytes": audio}
+        if ss.get("speech_error"):
+            st.warning(ss.speech_error)
+        if ss.get("summary_audio"):
+            st.caption("Spoken summary of the current recommendations. Press play to listen.")
+            st.audio(ss.summary_audio["bytes"], format="audio/mpeg", autoplay=False)
 csv_data, csv_filename = export.shortlist_csv(result)
 st.download_button("Export investigation shortlist", data=csv_data, file_name=csv_filename,
                    mime="text/csv", disabled=not rows, on_click="ignore", key="export_shortlist")
