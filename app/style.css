@@ -175,6 +175,10 @@ header[data-testid="stHeader"], [data-testid="stToolbar"], [data-testid="stDecor
 .lg-bar { position: absolute; z-index: 1; left: 2.6rem; bottom: 5px; height: 3px; border-radius: 2px; max-width: calc(100% - 2.6rem); background: var(--ink); opacity: 0.5; }
 .lg-row.up .lg-bar { background: var(--signal); opacity: 0.9; }
 
+.st-key-export_shortlist { margin-top: 0.8rem; }
+.st-key-export_shortlist button { font: 500 0.92rem/1 var(--sans); color: var(--ink-soft); text-decoration: underline; text-underline-offset: 3px; padding: 0.4rem 0; }
+.st-key-export_shortlist button:hover { color: var(--signal); }
+
 /* Movers */
 .movers { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1fr); gap: 1rem; align-items: stretch; }
 .mover { background: var(--card); border: 1px solid var(--rule); border-radius: 16px; padding: 1.4rem 1.5rem 1.5rem; animation: rise 0.6s var(--ease) both; display: flex; flex-direction: column; }
