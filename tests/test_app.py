@@ -197,25 +197,32 @@ def test_page_with_real_engine():
 
     default, tuned = run(tune=False), run(tune=True)
     at = run_app()
+    assert not at.exception, at.exception
     assert not at.warning, [w.value for w in at.warning]
     assert any(f"{default['dataset']['rows_used']:,} used" in md.value for md in at.markdown)
-    assert at.slider(key="w_severity").value == default["weights"]["w_severity"]
+    # The page opens on the agent's own choice, with its search shown.
+    assert at.slider(key="w_severity").value == tuned["weights"]["w_severity"]
+    assert at.slider(key="w_trend").value == tuned["weights"]["w_trend"]
     assert at.checkbox(key="exclude_provincial").value == default["weights"]["exclude_provincial"]
+    page = page_text(at)
+    overlap = f"{tuned['metrics']['overlap_with_baseline']} of {len(tuned['top20'])} the same"
+    assert overlap in page
+    for row in tuned["top20"]:
+        assert ui._clip(row["name"], 56) in page
+    for mover in tuned["movers"]:
+        assert mover["reason"] in page
+    for it in tuned["agent_iterations"]:
+        assert it["note"] in page
+
+    at.slider(key="w_severity").set_value(0.0).run()
+    assert not at.exception, at.exception
+    assert f"{len(default['top20'])} of {len(default['top20'])} the same" in page_text(at)
 
     button(at, TUNE_LABEL).click().run()
     assert not at.exception, at.exception
     assert not at.warning, [w.value for w in at.warning]
     assert at.slider(key="w_severity").value == tuned["weights"]["w_severity"]
-    assert at.slider(key="w_trend").value == tuned["weights"]["w_trend"]
-    overlap = f"{tuned['metrics']['overlap_with_baseline']} of {len(tuned['top20'])} the same"
-    page = page_text(at)
-    assert overlap in page
-    for row in tuned["top20"]:
-        assert ui._clip(row["name"], 50) in page
-    for mover in tuned["movers"]:
-        assert mover["reason"] in page
-    for it in tuned["agent_iterations"]:
-        assert it["note"] in page
+    assert overlap in page_text(at)
 
 
 def test_briefing_audio_is_cached_per_script(no_engine, monkeypatch):
