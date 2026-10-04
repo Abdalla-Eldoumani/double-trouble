@@ -11,6 +11,7 @@ import streamlit as st
 from streamlit.testing.v1 import AppTest
 
 from app import briefing, planning, ui
+from app.load import ResultShapeError
 from engine.agent import run
 from engine.planner import parse
 
@@ -148,7 +149,7 @@ def test_blank_transcript_and_empty_tts_are_safe(sdk, monkeypatch):
     with pytest.raises(briefing.SpeechError, match='No speech'):
         briefing.transcribe(wav(), 'mock-key')
     monkeypatch.setattr(briefing, '_client', lambda key: types.SimpleNamespace(text_to_speech=types.SimpleNamespace(convert=lambda **kw: iter([]))))
-    with pytest.raises(briefing.SpeechError, match='No summary audio'):
+    with pytest.raises(briefing.SpeechError, match='returned no audio'):
         briefing.synthesize('test', 'mock-key')
 
 
@@ -177,6 +178,80 @@ def test_missing_key_app_and_typed_planner_work(sdk, monkeypatch):
     assert at.selectbox(key='area').value == 'NE'
     assert at.number_input(key='capacity').value == 5
     assert not sdk['clients']
+    assert at.session_state['reply']['text'] == 'Got it. Showing up to 5 locations in northeast Calgary.'
+    assert 'audio' not in at.session_state['reply'] and not at.get('audio')
+    assert not at.warning
+
+
+@pytest.mark.parametrize('reviewed_voice', [False, True])
+def test_confirmation_tts_failure_keeps_applied_plan_and_safe_text(sdk, monkeypatch, reviewed_voice):
+    monkeypatch.setenv('ELEVENLABS_API_KEY', 'mock-key')
+    at = app()
+    if reviewed_voice:
+        open_voice(at, monkeypatch, wav())
+        click(at, 'transcribe_recording')
+    sdk['failure'] = RuntimeError('sensitive-key private-request')
+    text = 'Top five locations in northwest Calgary. Give recent crashes twice the importance.'
+    if reviewed_voice:
+        apply_voice(at, text)
+    else:
+        at.text_input(key='planner_text').set_value(text)
+        next(b for b in at.button if b.label == 'Update recommendations').click().run()
+    assert not at.exception
+    assert at.selectbox(key='area').value == 'NW'
+    assert at.number_input(key='capacity').value == 5
+    assert at.slider(key='recent_weight').value == 2
+    assert '5 locations recommended in Northwest Calgary' in summary(at)
+    assert at.session_state['settings'] == planning.from_result(at.session_state['last_result'])
+    reply = at.session_state['reply']
+    assert reply['text'] in ' '.join(md.value for md in at.markdown)
+    assert 'audio' not in reply and not at.get('audio')
+    assert len(sdk['tts']) == 1 and sdk['tts'][0]['text'] == reply['text']
+    assert at.warning[0].value.startswith('Request applied. Reading the confirmation failed or timed out.')
+    assert 'summary' not in at.warning[0].value
+    assert 'sensitive-key' not in at.warning[0].value and 'private-request' not in at.warning[0].value
+    at.toggle(key='dark_mode').set_value(True).run()
+    at.run()
+    assert len(sdk['tts']) == 1 and at.warning[0].value == reply['audio_error']
+
+
+def test_planner_failure_never_generates_confirmation_audio(sdk, monkeypatch):
+    monkeypatch.setenv('ELEVENLABS_API_KEY', 'mock-key')
+    at = app()
+    before = copy.deepcopy(at.session_state['settings'])
+
+    def fail(*args, **kwargs):
+        raise ResultShapeError('The result is missing fields the app needs.')
+
+    monkeypatch.setattr('app.load.get_result', fail)
+    at.text_input(key='planner_text').set_value('Top five in northeast Calgary.')
+    next(b for b in at.button if b.label == 'Update recommendations').click().run()
+    assert not at.exception and at.error
+    assert at.session_state['settings'] == before
+    assert not sdk['clients'] and not at.get('audio')
+    assert 'reply' not in at.session_state
+
+
+def test_confirmation_and_optional_summary_remain_separate(sdk, monkeypatch):
+    monkeypatch.setenv('ELEVENLABS_API_KEY', 'mock-key')
+    at = app()
+    at.text_input(key='planner_text').set_value('Only show northeast Calgary.')
+    next(b for b in at.button if b.label == 'Update recommendations').click().run()
+    assert not at.exception
+    assert len(sdk['tts']) == 1 and sdk['tts'][0]['text'] == 'Got it. Showing northeast Calgary only.'
+    assert len(at.get('audio')) == 1 and at.get('audio')[0].proto.autoplay
+    click(at, 'read_summary')
+    assert len(sdk['tts']) == 2 and sdk['tts'][1]['text'] == briefing.build_script(at.session_state['last_result'])
+    assert len(at.get('audio')) == 2 and all(not audio.proto.autoplay for audio in at.get('audio'))
+    at.run()
+    click(at, 'read_summary')
+    assert len(sdk['tts']) == 2
+    # An unsupported request cannot claim that settings were applied or speak.
+    at.text_input(key='planner_text').set_value('What is the weather like?')
+    next(b for b in at.button if b.label == 'Update recommendations').click().run()
+    assert at.session_state['reply']['text'].startswith('Settings unchanged.')
+    assert 'audio' not in at.session_state['reply'] and len(sdk['tts']) == 2
+    assert len(at.get('audio')) == 1 and not at.get('audio')[0].proto.autoplay
 
 
 def test_review_edit_same_planner_followups_and_no_duplicate_stt(sdk, monkeypatch):
@@ -199,14 +274,25 @@ def test_review_edit_same_planner_followups_and_no_duplicate_stt(sdk, monkeypatc
     assert at.number_input(key='capacity').value == 5
     assert at.slider(key='recent_weight').value == 2
     assert '5 locations recommended in Northwest Calgary' in summary(at)
+    reply = at.session_state['reply']
+    assert len(sdk['tts']) == 1 and sdk['tts'][0]['text'] == reply['text']
+    assert 'up to 5 locations in northwest Calgary' in reply['text']
+    assert reply['audio'] == b'ID3mocked audio'
+    assert at.get('audio')[0].proto.autoplay
+    at.toggle(key='dark_mode').set_value(False).run()
+    at.run()
+    assert len(sdk['tts']) == 1 and not at.get('audio')[0].proto.autoplay
     apply_voice(at, 'Now show all Calgary.')
     assert at.selectbox(key='area').value == 'ALL'
     assert at.number_input(key='capacity').value == 5
+    assert len(sdk['tts']) == 2 and sdk['tts'][-1]['text'] == 'Got it. Showing all Calgary again.'
+    assert at.get('audio')[0].proto.autoplay
     at.selectbox(key='priorities').select('Pedestrians and cyclists').run()
     at.number_input(key='capacity').set_value(10).run()
     at.toggle(key='dark_mode').set_value(False).run()
     assert at.selectbox(key='area').value == 'ALL'
-    assert len(sdk['stt']) == 1 and not sdk['tts']
+    assert len(sdk['stt']) == 1 and len(sdk['tts']) == 2
+    assert not at.get('audio')  # setting changes clear the old confirmation
     assert at.session_state['settings'] == planning.from_result(at.session_state['last_result'])
     at.toggle(key='voice_open').set_value(False).run()
     at.toggle(key='voice_open').set_value(True).run()
@@ -310,6 +396,41 @@ def test_briefing_is_current_factual_and_invalidates_unspoken_rows():
     result['plan']['shortlist'] = []
     assert '0 locations' in briefing.build_script(result)
     assert 'No locations qualify' in briefing.build_script(result)
+
+
+@pytest.mark.parametrize('phrase, expected', [
+    ('Only show northeast Calgary.', 'Got it. Showing northeast Calgary only.'),
+    ('Top five in northwest Calgary. Weight recent crashes twice as much.',
+     'Got it. Showing up to 5 locations in northwest Calgary, with July to December crashes weighted twice as much.'),
+    ('Give pedestrians and cyclists more importance.',
+     'Got it. Pedestrian, cyclist, multi-vehicle and blocked-lane reports have added importance.'),
+    ('Now show all Calgary.', 'Got it. Showing all Calgary again.'),
+    ('Top 50 locations in northeast Calgary. Also tell me the weather.',
+     'Got it. Showing up to 20 locations in northeast Calgary.'),
+    ('Ignore recency.', 'Got it. July to December crashes weighted the same as earlier crashes.'),
+    ('Ignore severity.', 'Got it. Pedestrian, cyclist, multi-vehicle and blocked-lane reports have no extra weighting.'),
+    ('Include Deerfoot and Stoney.', 'Got it. Deerfoot and Stoney included.'),
+])
+def test_confirmation_uses_parsed_applied_settings_only(phrase, expected):
+    asked = parse(phrase)
+    settings = {'weights': {**planning.DEFAULT_WEIGHTS, **asked['weights']},
+                'constraints': {**planning.DEFAULT_CONSTRAINTS, **asked['constraints']}}
+    assert planning.confirmation(asked, settings) == expected
+
+
+@pytest.mark.parametrize('phrase', ['Reset.', 'Find the best ranking automatically.'])
+def test_reset_and_tuning_confirm_actual_applied_settings_concisely(phrase):
+    asked = parse(phrase)
+    result = run(planning.DEFAULT_WEIGHTS, tune=asked['tune'], constraints=planning.DEFAULT_CONSTRAINTS)
+    settings = planning.from_result(result)
+    text = planning.confirmation(asked, settings)
+    if asked['reset']:
+        assert text == 'Got it. Reset to all Calgary, up to 20 locations, crash totals, with Deerfoot and Stoney excluded.'
+    else:
+        assert text.startswith('Got it. Ranking options tested.')
+        assert ('reports have added importance' in text) == bool(settings['weights']['w_severity'])
+        assert ('activity has added importance' in text) == bool(settings['weights']['w_trend'])
+    assert len(text.split()) < 40
 
 
 @pytest.mark.parametrize('phrase,field,value', [

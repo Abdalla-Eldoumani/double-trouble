@@ -172,7 +172,7 @@ def transcribe(audio, key, model_id=None):
         raise SpeechError(_failure(exc, "Transcription")) from None
 
 
-def synthesize(script, key, voice_id=None, model_id=None):
+def synthesize(script, key, voice_id=None, model_id=None, *, action="Reading the summary"):
     """Collect the SDK's MP3 byte iterator. No global audio cache or auto playback."""
     started = time.monotonic()
     try:
@@ -183,15 +183,15 @@ def synthesize(script, key, voice_id=None, model_id=None):
         audio = bytearray()
         for chunk in chunks:
             if time.monotonic() - started > REQUEST_TIMEOUT or len(audio) > 5_000_000:
-                raise SpeechError("Reading the summary timed out. Please retry.")
+                raise SpeechError(f"{action} timed out. Please retry.")
             audio.extend(chunk)
         if not audio:
-            raise SpeechError("No summary audio was returned. Please retry.")
+            raise SpeechError(f"{action} returned no audio. Please retry.")
         return bytes(audio)
     except SpeechError:
         raise
     except Exception as exc:
-        raise SpeechError(_failure(exc, "Reading the summary")) from None
+        raise SpeechError(_failure(exc, action)) from None
 
 
 def briefing_id(result, config):
