@@ -10,7 +10,7 @@ Built for the IEEE YP Industry Hackathon 2026, Energy and Infrastructure Systems
 2. **Group.** Turn each free-text location into one key: direction words removed, abbreviations and feed typos fixed, street order sorted. Keys with the same streets but a different quadrant tag are merged when their centres are within 300 m, because the feed tags crossings of Macleod Trail or Memorial Drive either way.
 3. **Score.** Every incident is 1 point, plus 3 when the text names a pedestrian or cyclist, plus 1 for multi-vehicle, plus 1 when more than one lane is blocked. The feed has no injury field, so this is a keyword score, stated in `engine/score.py` so it can be argued with.
 4. **Agent loop.** Plan 15 weight settings (severity 0 to 1, trend 0 to 1), simplest first. Rank on January to August, then count the September to December severity points each top 20 would have caught. Keep a setting only when it catches strictly more; ties stay with the simpler weights. Locations tied at the cut share credit, so alphabetical order never decides a test.
-5. **Report.** Re-rank the full year with the chosen weights, compare with a plain count, and explain the three biggest rank changes from each location's own numbers.
+5. **Report.** Re-rank the full year with the chosen weights, compare with a plain count, and explain the three biggest rank changes from each location's own numbers. The shortlist on screen downloads as a CSV with each location's counts, reason and the settings that produced it.
 6. **Plan.** A rules-based planner turns a typed or spoken request ("top 5 in the northwest, recent incidents twice") into constraints, re-runs the engine and says what changed. ElevenLabs handles speech when a key is set.
 
 ## Results on the 2025 file
