@@ -198,15 +198,15 @@ def explain(current: dict, comparison: dict, heard: list[str]) -> str:
         else:
             parts.append("Same locations as before" + (", in a new order." if comparison["moved"] else "."))
 
-    gap = plan["points_agent"] - plan["points_baseline"]
+    gap = round(plan["points_agent"] - plan["points_baseline"], 1)
     if gap > 0:
-        verdict = f"{gap} more than a plain incident count"
+        verdict = f"{gap:g} more than a plain incident count"
     elif gap < 0:
-        verdict = f"{-gap} fewer than a plain incident count"
+        verdict = f"{-gap:g} fewer than a plain incident count"
     else:
         verdict = "the same as a plain incident count"
     parts.append(
-        f"Backtest: ranked on January to August, this top {n} caught {plan['points_agent']} of "
+        f"Backtest: ranked on January to August, this top {n} caught {round(plan['points_agent'], 1):g} of "
         f"{plan['points_total']} September to December severity points, {verdict}."
     )
     return " ".join(parts)
