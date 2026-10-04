@@ -13,8 +13,7 @@ sys.path.insert(0, str(ROOT))
 from app import briefing  # noqa: E402
 
 MAIN = str(ROOT / "app" / "main.py")
-EXAMPLE = ("Prioritize recent crashes twice as much, only show northwest Calgary, "
-           "and assume we can only investigate five intersections.")
+EXAMPLE = "We can investigate five locations in northwest Calgary. Give recent crashes twice the importance."
 
 
 @pytest.fixture(autouse=True)
@@ -43,7 +42,7 @@ def shortlist_names(at):
 
 def ask(at, text):
     at.text_input(key="planner_text").set_value(text)
-    next(b for b in at.button if b.label == "Run request").click().run()
+    next(b for b in at.button if b.label == "Update recommendations").click().run()
     assert not at.exception, at.exception
     reply = at.session_state["reply"]["text"]
     assert "You asked" in page_text(at) and reply in page_text(at)
@@ -53,10 +52,13 @@ def ask(at, text):
 def test_typed_request_reranks_with_the_real_engine():
     at = run_app()
     reply = ask(at, EXAMPLE)
-    assert "northwest Calgary only" in reply and "a budget of 5 intersections" in reply
-    assert "count twice" in reply and "Backtest" in reply
-    assert "Top 5 on the map" in page_text(at)
-    assert re.search(r"\d of 5 the same as count-only", page_text(at))
+    assert "Northwest Calgary" in reply and "Up to 5 locations" in reply
+    assert "twice the importance" in reply and "Backtest" not in reply
+    assert "Up to 5 locations in Northwest Calgary" in page_text(at)
+    assert re.search(r"Top-list overlap: \d of 5", page_text(at))
+    assert at.selectbox(key="area").value == "NW"
+    assert at.number_input(key="capacity").value == 5
+    assert at.selectbox(key="priorities").value == "Recent activity"
     names = shortlist_names(at)
     assert len(names) == 5 and all(name.endswith("NW") for name in names)
     assert not at.warning
@@ -66,36 +68,32 @@ def test_follow_up_keeps_earlier_settings_and_reports_the_change():
     at = run_app()
     ask(at, EXAMPLE)
     reply = ask(at, "Now show me the northeast instead.")
-    assert "northeast Calgary only" in reply
-    assert "replaces the top 5 for northwest Calgary" in reply
+    assert "Northeast Calgary" in reply
+    assert "Up to 5 locations" in reply and "twice the importance" in reply
     assert all(name.endswith("NE") for name in shortlist_names(at))
 
 
 def test_tune_respects_the_provincial_checkbox():
     at = run_app()
     at.checkbox(key="exclude_provincial").uncheck().run()
-    next(b for b in at.button if b.label == "Let the agent tune it").click().run()
+    next(b for b in at.button if b.label == "Test ranking options automatically").click().run()
     assert not at.exception, at.exception
     assert at.checkbox(key="exclude_provincial").value is False
 
 
-def test_spoken_reply_uses_elevenlabs_when_a_key_is_set(monkeypatch):
+def test_typed_ui_never_invokes_speech_when_a_key_is_set(monkeypatch):
     monkeypatch.setenv("ELEVENLABS_API_KEY", "test-key-not-real")
-    spoken = []
-
-    class FakeTTS:
-        def convert(self, **kwargs):
-            spoken.append(kwargs["text"])
-            return iter([b"ID3", b"audio"])
-
-    class FakeClient:
-        def __init__(self, api_key):
-            self.text_to_speech = FakeTTS()
-
-    monkeypatch.setattr("elevenlabs.client.ElevenLabs", FakeClient)
+    def forbidden(*args, **kwargs):
+        pytest.fail("UI phase must not invoke speech or inspect credentials")
+    for name in ("api_key", "synthesize", "transcribe"):
+        monkeypatch.setattr(briefing, name, forbidden)
     at = run_app()
     reply = ask(at, EXAMPLE)
-    assert spoken and spoken[-1] in reply
+    assert "Updated:" in reply
+    at.selectbox(key="area").select("NE").run()
+    next(b for b in at.button if b.label == "Test ranking options automatically").click().run()
+    assert not at.exception
+    assert not at.get("audio_input") and not at.get("audio")
     assert not at.error
 
 

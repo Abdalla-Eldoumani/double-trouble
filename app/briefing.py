@@ -2,7 +2,7 @@ import os
 
 import streamlit as st
 
-FOOTER = "This ranks where harm was reported in 2025. It does not predict or prevent crashes."
+FOOTER = "A shortlist for investigation, based on reported crashes in 2025. It does not predict or prevent crashes."
 VOICE_ID = "JBFqnCBsd6RMkjVDRZzb"
 MODEL_ID = "eleven_multilingual_v2"
 QUADRANTS = {"nw", "ne", "sw", "se"}

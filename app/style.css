@@ -4,7 +4,7 @@
   --card: #fbf9f4;
   --ink: #1c1a17;
   --ink-soft: #5b554b;
-  --ink-faint: #8c8577;
+  --ink-faint: #716a5f;
   --rule: #d9d1c2;
   --signal: #b83a1b;
   --signal-wash: #f3e0d6;
@@ -42,31 +42,31 @@ header[data-testid="stHeader"], [data-testid="stToolbar"], [data-testid="stDecor
 .mast .dot { display: inline-block; width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--signal); margin-right: 0.6rem; transform: translateY(-1px); }
 
 /* Hero */
-.hero { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); column-gap: 3.5rem; row-gap: 2rem; align-items: end; padding: 3rem 0 2.4rem; }
+.hero { display: grid; grid-template-columns: minmax(0, 1fr); row-gap: 1.4rem; padding: 2.2rem 0 1.8rem; }
 .hero .title { grid-column: 1 / -1; }
-.hero-side { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); column-gap: 3.5rem; align-items: start; }
+.hero-side { grid-column: 1 / -1; }
 .hero-side .source { margin-top: 0.2rem; }
 .title {
   font-family: var(--serif); font-weight: 600; font-variation-settings: "opsz" 144;
-  font-size: clamp(3.4rem, 7vw, 7.4rem); line-height: 0.94; letter-spacing: -0.03em; max-width: 15ch;
+  font-size: clamp(2.6rem, 5vw, 4.8rem); line-height: 1.04; letter-spacing: -0.03em; max-width: 26ch;
   color: var(--ink); text-wrap: balance;
 }
 .title em { font-style: italic; font-weight: 500; color: var(--signal); letter-spacing: -0.02em; padding-right: 0.04em; }
-.lede { font: 400 1.45rem/1.5 var(--sans); color: var(--ink-soft); max-width: 42ch; text-wrap: pretty; }
+.lede { font: 400 1.15rem/1.55 var(--sans); color: var(--ink-soft); max-width: 82ch; text-wrap: pretty; }
 .source { margin-top: 1.1rem; font: 400 0.82rem/1.55 var(--mono); color: var(--ink-faint); max-width: 52ch; }
 .source b { font-weight: 500; color: var(--ink-soft); }
 
 /* Figures */
-.figures { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); }
+.figures { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); }
 .fig { padding: 1.5rem 1.6rem 1.6rem; border-left: 1px solid var(--rule); animation: rise 0.6s var(--ease) both; }
 .fig:first-child { border-left: 0; padding-left: 0; }
 .fig:nth-child(2) { animation-delay: 60ms; }
 .fig:nth-child(3) { animation-delay: 120ms; }
 .fig:nth-child(4) { animation-delay: 180ms; }
-.fig-label { font: 500 0.8rem/1.2 var(--sans); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-faint); }
+.fig-label { font: 600 0.95rem/1.3 var(--sans); color: var(--ink-soft); }
 .fig-value {
   margin: 0.55rem 0 0.4rem; font-family: var(--serif); font-weight: 500; font-variation-settings: "opsz" 144;
-  font-size: 3.4rem; line-height: 1; letter-spacing: -0.03em; font-variant-numeric: lining-nums tabular-nums; color: var(--ink);
+  font-size: 2.8rem; line-height: 1; letter-spacing: -0.03em; font-variant-numeric: lining-nums tabular-nums; color: var(--ink);
 }
 .fig-value small { font-size: 0.42em; letter-spacing: 0; color: var(--ink-faint); margin-left: 0.15em; }
 .fig-value.gain { color: var(--signal); }
@@ -89,17 +89,18 @@ header[data-testid="stHeader"], [data-testid="stToolbar"], [data-testid="stDecor
 /* Control cards */
 .st-key-controls, .st-key-planner {
   background: var(--card); border: 1px solid var(--rule); border-radius: 16px;
-  padding: 1.4rem 1.6rem 1.35rem; margin-top: 2.2rem; height: 100%;
+  padding: 1.4rem 1.6rem 1.35rem; margin-top: 1rem; height: 100%;
   box-shadow: 0 1px 0 rgba(28, 26, 23, 0.04), 0 22px 44px -32px rgba(92, 64, 38, 0.45);
 }
 .st-key-planner { background: var(--ink); border-color: var(--ink); color: var(--paper); }
 .st-key-planner .ctl-title { color: var(--paper); }
 .st-key-planner .card-note { color: #c9c1b2; }
 .st-key-planner [data-testid="stWidgetLabel"] p { color: #c9c1b2; }
+.st-key-planner [data-testid="stCaptionContainer"] p { color: #c9c1b2; }
 .st-key-planner [data-testid="stTextInput"] input {
   background: #26231f; color: var(--paper); border-radius: 8px; font: 400 1.02rem/1.3 var(--sans); padding: 0.85rem 0.9rem;
 }
-.st-key-planner [data-testid="stTextInput"] input::placeholder { color: #8a8274; }
+.st-key-planner [data-testid="stTextInput"] input::placeholder { color: #b4ad9f; }
 .st-key-planner [data-testid="stTextInputRootElement"] { border-color: #3a362f; background: #26231f; }
 .st-key-planner [data-testid="stForm"] { border: 0; padding: 0; }
 .st-key-planner .stButton > button[kind="tertiary"], .st-key-planner [data-testid="stBaseButton-tertiary"] {
@@ -151,13 +152,22 @@ header[data-testid="stHeader"], [data-testid="stToolbar"], [data-testid="stDecor
 
 /* Shortlist ledger */
 .ledger { border-top: 1px solid var(--ink); }
-.lg-head, .lg-row { display: grid; grid-template-columns: 2rem minmax(0, 1fr) 3.4rem 3.4rem 4rem; column-gap: 0.6rem; align-items: center; }
+.lg-head, .lg-row { display: grid; grid-template-columns: 2.8rem minmax(0, 1fr); column-gap: 0.7rem; align-items: start; }
 .lg-head { padding: 0.65rem 0 0.55rem; border-bottom: 1px solid var(--rule); font: 500 0.74rem/1 var(--sans); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-faint); }
 .lg-head span { white-space: nowrap; letter-spacing: 0.05em; }
 .lg-head span:nth-child(n+3) { text-align: right; }
-.lg-row { position: relative; min-height: 44px; padding: 0.45rem 0; border-bottom: 1px solid var(--rule); animation: rise 0.45s var(--ease) both; }
+.lg-row { position: relative; min-height: 70px; padding: 0.9rem 0; border-bottom: 1px solid var(--rule); animation: rise 0.45s var(--ease) both; }
 .lg-rank { font: 600 1.15rem/1 var(--serif); font-variant-numeric: lining-nums tabular-nums; color: var(--ink); }
-.lg-name { font: 500 0.96rem/1.25 var(--sans); color: var(--ink); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; text-wrap: balance; }
+.lg-name { font: 600 1rem/1.35 var(--sans); color: var(--ink); text-wrap: pretty; overflow-wrap: anywhere; }
+.lg-detail { margin-top: 0.35rem; font: 400 0.88rem/1.5 var(--sans); color: var(--ink-soft); }
+.ledger { max-height: 520px; overflow-y: auto; padding-right: 0.5rem; }
+.settings-summary { margin: 0.7rem 0 1rem; padding: 0.8rem 1rem; background: var(--paper-deep); border-radius: 8px; font: 500 0.95rem/1.6 var(--sans); color: var(--ink); }
+.rank-note { margin-top: 0.8rem; font: 400 0.8rem/1.5 var(--sans); color: var(--ink-faint); }
+.mover.lead .rank-note { color: #c9c1b2; }
+.validation p { margin: 0.8rem 0; font: 400 0.98rem/1.6 var(--sans); color: var(--ink-soft); }
+.validation-row { padding: 1rem 0; border-bottom: 1px solid var(--rule); font: 400 0.95rem/1.6 var(--sans); }
+.validation-row b { color: var(--ink); }
+[data-testid="stExpander"] { margin-top: 0.6rem; }
 .lg-num { font: 400 0.92rem/1 var(--mono); color: var(--ink-soft); text-align: right; font-variant-numeric: tabular-nums; }
 .lg-num.hot { color: var(--signal); font-weight: 600; }
 .lg-delta { font: 500 0.9rem/1 var(--mono); text-align: right; }
@@ -253,6 +263,19 @@ header[data-testid="stHeader"], [data-testid="stToolbar"], [data-testid="stDecor
   .movers { grid-template-columns: minmax(0, 1fr); }
   [data-testid="stMainBlockContainer"] { padding: 1.6rem 1.2rem 4rem; }
   .hero, .foot { grid-template-columns: minmax(0, 1fr); gap: 1.6rem; }
-  .figures { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .fig:nth-child(3) { border-left: 0; padding-left: 0; }
+  .figures { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (max-width: 640px) {
+  .mast { flex-direction: column; align-items: flex-start; gap: 0.7rem; font-size: 0.65rem; line-height: 1.4; }
+  .title { font-size: 2.35rem; }
+  .figures { grid-template-columns: minmax(0, 1fr); }
+  .fig, .fig:first-child { border-left: 0; padding: 1rem 0; border-bottom: 1px solid var(--rule); }
+  .fig-value { font-size: 2.5rem; }
+  .st-key-controls, .st-key-planner { padding: 1rem; }
+  .sec { grid-template-columns: 2.5rem minmax(0, 1fr); margin-top: 2rem; }
+  .sec-title { font-size: 1.8rem; }
+  .ledger { max-height: none; }
+  .trace { min-width: 680px; }
+  [data-testid="stExpanderDetails"] { overflow-x: auto; }
 }
