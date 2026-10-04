@@ -235,7 +235,7 @@ def test_briefing_audio_is_cached_per_script(no_engine, monkeypatch):
             return iter([b"ID3", b"audio"])
 
     class FakeClient:
-        def __init__(self, api_key):
+        def __init__(self, api_key, **kwargs):
             self.text_to_speech = FakeTTS()
 
     monkeypatch.setattr("elevenlabs.client.ElevenLabs", FakeClient)
@@ -264,3 +264,11 @@ def test_trace_marks_only_the_chosen_weights():
     out = ui.trace(tuned)
     assert out.count('<span class="tag">chosen</span>') == 1
     assert out.index("chosen") > out.index(tuned["agent_iterations"][0]["note"])
+
+
+def test_briefing_follows_the_planner_scope():
+    result = copy.deepcopy(FIXTURE)
+    result["plan"] = {"constraints": {"budget": 3, "region": "NW", "recent_weight": 1.0}}
+    script = briefing.build_script(result)
+    assert "The top 3 in northwest Calgary:" in script
+    assert script.count("Number ") == 3
