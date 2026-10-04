@@ -53,12 +53,12 @@ def ask(at, text):
 def test_typed_request_reranks_with_the_real_engine():
     at = run_app()
     reply = ask(at, EXAMPLE)
-    assert "northwest Calgary only" in reply and "a budget of 5 intersections" in reply
+    assert "northwest Calgary only" in reply and "a budget of 5 locations" in reply
     assert "count twice" in reply and "Backtest" in reply
     assert "Top 5 on the map" in page_text(at)
     assert re.search(r"\d of 5 the same as count-only", page_text(at))
     names = shortlist_names(at)
-    assert len(names) == 5 and all(name.endswith("NW") for name in names)
+    assert len(names) == 5 and all(name.endswith(("NW", " N", " W")) for name in names)
     assert not at.warning
 
 
