@@ -46,7 +46,7 @@ python3.12 -m venv .venv
 
 Open `http://localhost:8501`. Browsers only allow the microphone on `localhost` or HTTPS. The map's basemap tiles load from the internet; the pins, lists and everything else work offline.
 
-Voice input and the spoken briefing use ElevenLabs. Set `ELEVENLABS_API_KEY` in the environment or in `.streamlit/secrets.toml` (gitignored). Without a key, typed planner requests and everything else still work.
+Voice input and the spoken briefing use ElevenLabs. Set `ELEVENLABS_API_KEY` in the environment or in `.streamlit/secrets.toml` (gitignored). Without a key, typed planner requests and everything else still work. Requests to ElevenLabs time out after 15 seconds; start the app with `DT_NO_VOICE=1` to switch voice off without removing the key.
 
 ## Data
 
