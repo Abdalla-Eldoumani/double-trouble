@@ -110,7 +110,7 @@ def test_movers_are_actual_changes_include_dropouts_and_use_applied_criteria(wei
         assert ("Moved higher" if mover["direction"] == "up" else "Moved lower") in output
         for field in ("incidents", "pedestrian_or_cyclist", "multi_vehicle", "multiple_lanes", "early", "late"):
             assert mover[field] == observed.at[mover["location_key"], field]
-        assert ui.esc(ui.location_evidence(mover, result)) in output
+        assert ui.esc(ui.priority_effect(mover, result)) in output
     # The real engine's biggest changes extend beyond the current five leaders.
     assert {m["location_key"] for m in movers} != {r["location_key"] for r in result["top20"][:3]}
     if not result["weights"]["w_severity"]:
@@ -131,7 +131,8 @@ def test_movers_show_only_genuine_changes_and_do_not_invent_sample_evidence(weig
     output = ui.ranking_changes(result, lambda k: k)
     assert output.count('class="ranking-change"') == 1
     result["movers"] = []
-    assert ui.NO_MOVEMENT in ui.ranking_changes(result, lambda k: k)
+    assert ui.NO_MOVEMENT not in ui.ranking_changes(result, lambda k: k)
+    assert "entered and" in ui.ranking_changes(result, lambda k: k)
     fixture = json.loads((Path(__file__).resolve().parent.parent / "contract/sample_output.json").read_text())
     # The fixture lists unchanged movers; filter these while retaining its existing warnings.
     assert "No consistent ranking-change details" in ui.ranking_changes(fixture, lambda k: k)

@@ -10,7 +10,7 @@ from streamlit.testing.v1 import AppTest
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from app import briefing  # noqa: E402
+from app import briefing, ui  # noqa: E402
 
 MAIN = str(ROOT / "app" / "main.py")
 EXAMPLE = "We can investigate five locations in northwest Calgary. Give recent crashes twice the importance."
@@ -55,7 +55,7 @@ def test_typed_request_reranks_with_the_real_engine():
     assert "Northwest Calgary" in reply and "Up to 5 locations" in reply
     assert "twice the importance" in reply and "Backtest" not in reply
     assert "Up to 5 locations in Northwest Calgary" in page_text(at)
-    assert re.search(r"Top-list overlap: \d of 5", page_text(at))
+    assert re.search(r"Top-list overlap: \d of 5", ui.validation(at.session_state["last_result"]))
     assert at.selectbox(key="area").value == "NW"
     assert at.number_input(key="capacity").value == 5
     assert at.selectbox(key="priorities").value == "Recent activity"

@@ -52,7 +52,7 @@ def assert_consistent(at):
     plan = result["plan"]
     rows = ui.recommended_rows(result)
     assert at.session_state["settings"] == planning.from_result(result)
-    assert at.selectbox(key="area").value == plan["constraints"]["region"]
+    assert at.selectbox(key="area").value == planning.ui_region(plan["constraints"]["region"])
     assert at.number_input(key="capacity").value == plan["constraints"]["budget"]
     assert at.selectbox(key="priorities").value == planning.preset_name(planning.from_result(result))
     for name in ("w_severity", "w_trend"):
@@ -64,9 +64,10 @@ def assert_consistent(at):
     assert f'Locations recommended</div><div class="fig-value">{len(rows)}</div>' in figures
     assert f'Selected beyond crash totals</div><div class="fig-value">{beyond}</div>' in figures
     assert figures in " ".join(md.value for md in at.markdown)
-    summaries = [md for md in at.markdown if 'class="dt recommendation-summary"' in md.value]
-    assert len(summaries) == 1 and summaries[0].value == ui.recommendation_summary(result)
-    assert summaries[0].value.count("<li>") == min(3, len(rows))
+    summaries = [node.proto.body for node in at.get("html")
+                 if 'class="dt recommendation-summary"' in node.proto.body]
+    assert len(summaries) == 1 and summaries[0] == ui.recommendation_summary(result)
+    assert summaries[0].count("<li>") == min(3, len(rows))
     assert len(at.download_button) == 1
     assert at.download_button(key="export_shortlist").label == "Export investigation shortlist"
     assert at.download_button(key="export_shortlist").disabled == (not rows)
@@ -97,7 +98,7 @@ def test_opening_defaults_and_reset_are_truthful():
     assert at.session_state["last_result"]["agent_iterations"][0]["note"].startswith("given weights, not tuned")
     assert "Where should Calgary focus its next" in text(at)
     assert "Why these locations are priorities" in text(at)
-    assert [e.label for e in at.expander] == ["Advanced controls", "How we tested the ranking", "About the data"]
+    assert [e.label for e in at.expander] == ["Advanced controls", "About the data and attribution"]
     assert all(not e.proto.expanded for e in at.expander)
     assert_consistent(at)
     ask(at, EXAMPLE)
@@ -154,14 +155,15 @@ def test_summary_and_download_update_with_all_planning_inputs(monkeypatch):
 def test_summary_is_visible_before_map_and_sliders_use_honest_labels():
     at = app()
     nodes = list(at.main)
-    summary_pos = next(i for i, node in enumerate(nodes) if node.type == "markdown" and 'class="dt recommendation-summary"' in node.value)
+    summary_pos = next(i for i, node in enumerate(nodes) if node.type == "html" and 'class="dt recommendation-summary"' in node.proto.body)
+    export_pos = next(i for i, node in enumerate(nodes) if node.type == "download_button")
     map_pos = next(i for i, node in enumerate(nodes) if node.type == "deck_gl_json_chart")
-    assert summary_pos < map_pos
+    assert summary_pos < export_pos < map_pos
     assert at.slider(key="w_severity").label == "Give more priority to pedestrian/cyclist and other crash indicators"
     assert at.slider(key="w_trend").label == "Give more priority to locations with increasing crashes"
     assert at.slider(key="recent_weight").label == "Give more priority to recent crashes"
     captions = " ".join(c.value for c in at.caption)
-    assert "do not filter out other crash types" in captions
+    assert "do not exclude other crash types" in captions
     assert "not confirmed injury severity" in captions
     assert "July–December 2025" in at.slider(key="recent_weight").help
 
@@ -177,7 +179,7 @@ def test_control_and_planner_changes_retain_other_fields():
     assert at.selectbox(key="priorities").value == "Custom priorities"
     assert at.slider(key="w_severity").value == 0.65
     ask(at, "Top 10 across the whole city.")
-    assert at.selectbox(key="area").value is None
+    assert at.selectbox(key="area").value == "ALL"
     assert at.number_input(key="capacity").value == 10
     assert at.slider(key="w_severity").value == 0.65
     assert at.slider(key="w_trend").value == 0.35
@@ -222,7 +224,7 @@ def test_road_scope_and_tuning_preserve_constraints():
     result = at.session_state["last_result"]
     assert all(not any(road in r["location_key"] for road in ("deerfoot", "stoney"))
                for r in result["top20"] + result["baseline"]["top20"])
-    assert "previous search" in " ".join(c.value for c in at.caption)
+    assert at.session_state["tuned"] == tuned
     assert_consistent(at)
 
 
@@ -294,7 +296,8 @@ def test_sparse_and_empty_results_are_rendered_truthfully(monkeypatch, area, exp
     assert not at.exception, at.exception
     assert len(ui.recommended_rows(at.session_state["last_result"])) == expected
     assert f"{expected} locations qualify" in " ".join(i.value for i in at.info)
-    assert "not available (no evaluation-period proxy points)" in text(at)
+    result = at.session_state["last_result"]
+    assert "not available (no evaluation-period proxy points)" in ui.validation(result)
     assert_consistent(at)
 
 
@@ -304,3 +307,160 @@ def test_empty_evaluation_has_no_division_error():
     share, caught, total = backtest(df, ("2025-01-01", "2025-09-01"),
                                    ("2025-09-01", "2026-01-01"), DEFAULT_WEIGHTS, keep=set())
     assert (share, caught, total) == (0.0, 0, 0)
+
+
+@pytest.mark.parametrize("area,region", [("ALL", None), ("NW", "NW"), ("NE", "NE"), ("SW", "SW"), ("SE", "SE")])
+def test_area_boundary_round_trip(area, region):
+    assert planning.engine_region(area) == region
+    assert planning.ui_region(region) == area
+    with pytest.raises(ValueError):
+        planning.engine_region(None)
+
+
+def test_all_calgary_persists_across_every_planning_rerun(monkeypatch):
+    downloads = []
+    original = st.download_button
+
+    def capture(*args, **kwargs):
+        downloads.append(kwargs["data"])
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(st, "download_button", capture)
+    at = app()
+    at.selectbox(key="area").select("NW").run()
+    at.selectbox(key="area").select("ALL").run()
+
+    def check():
+        assert not at.exception
+        assert at.selectbox(key="area").value == "ALL"
+        assert at.session_state["settings"]["constraints"]["region"] is None
+        # Verify the serialized value the browser receives, not just Python state.
+        assert at.selectbox(key="area").proto.options[0] == "All Calgary"
+        if at.selectbox(key="area").proto.set_value:
+            assert at.selectbox(key="area").proto.raw_value == "All Calgary"
+        assert_consistent(at)
+
+    check()
+    at.run()  # unrelated rerun after focus leaves the widget
+    check()
+    at.number_input(key="capacity").set_value(5).run()
+    check()
+    at.selectbox(key="priorities").select("Pedestrians and cyclists").run()
+    check()
+    for key, value in [("w_severity", .65), ("w_trend", .35), ("recent_weight", 3.0)]:
+        at.slider(key=key).set_value(value).run()
+        check()
+    click(at, "Test ranking options automatically")
+    check()
+    ask(at, "Top 10 across the whole city.")
+    check()
+    before_settings = copy.deepcopy(at.session_state["settings"])
+    before_result = copy.deepcopy(at.session_state["last_result"])
+    before_reply = copy.deepcopy(at.session_state["reply"])
+    before_csv = downloads[-1]
+    at.toggle(key="dark_mode").set_value(True).run()
+    check()
+    assert at.session_state["dark_mode"] is True
+    assert at.session_state["settings"] == before_settings
+    assert at.session_state["last_result"] == before_result
+    assert at.session_state["reply"] == before_reply
+    assert downloads[-1] == before_csv
+    at.run()  # export uses on_click="ignore"; this also checks a rerun cannot clear area
+    check()
+    assert downloads[-1] == before_csv
+    click(at, "Reset settings")
+    check()
+    assert at.session_state["dark_mode"] is True
+    assert at.session_state["settings"] == {"weights": DEFAULT_WEIGHTS, "constraints": DEFAULT_CONSTRAINTS}
+    at.toggle(key="dark_mode").set_value(False).run()
+    check()
+
+
+def test_theme_retains_quadrant_planner_and_tuning_state():
+    at = app()
+    assert at.toggle(key="dark_mode").value is False
+    ask(at, EXAMPLE)
+    click(at, "Test ranking options automatically")
+    saved = {k: copy.deepcopy(at.session_state[k]) for k in ("settings", "tuned", "planner_text", "tuning_confirmation", "last_result")}
+    csv_before = export.shortlist_csv(saved["last_result"])
+    at.toggle(key="dark_mode").set_value(True).run()
+    for key, value in saved.items():
+        assert at.session_state[key] == value
+    assert at.selectbox(key="area").value == "NW"
+    assert export.shortlist_csv(at.session_state["last_result"]) == csv_before
+    ask(at, "City roads only.")
+    assert at.toggle(key="dark_mode").value is True
+    assert_consistent(at)
+
+
+def test_stale_presentation_refresh_preserves_applied_plan(monkeypatch):
+    at = app()
+    ask(at, EXAMPLE)
+    at.toggle(key="dark_mode").set_value(True).run()
+    saved = {key: copy.deepcopy(at.session_state[key])
+             for key in ("settings", "last_result", "reply", "planner_text", "dark_mode")}
+    # Simulate the observed long-lived server retaining an older presentation
+    # module after the script has changed. It must render the current summary
+    # again without losing the user's plan or recomputing different results.
+    monkeypatch.setattr(ui, "_source_mtime_ns", -1, raising=False)
+    monkeypatch.setattr(ui, "recommendation_summary", lambda result: "")
+    monkeypatch.setattr(ui, "hero", lambda *args: "Old cached presentation")
+    at.run()
+    for key, value in saved.items():
+        assert at.session_state[key] == value
+    assert "Old cached presentation" not in text(at)
+    assert_consistent(at)
+
+
+def test_membership_and_order_messages_do_not_depend_on_mover_metadata():
+    result = run(tune=False, constraints={"budget": 5})
+    assert ui.recommendation_change(result) == ui.NO_MOVEMENT
+    result["plan"]["baseline_shortlist"] = list(reversed(result["plan"]["shortlist"]))
+    assert ui.recommendation_change(result) == "Your selected priorities recommend the same locations in a different order."
+    assert ui.NO_MOVEMENT not in ui.ranking_changes(result, lambda k: k)
+    result["plan"]["baseline_shortlist"] = result["plan"]["shortlist"][:-1] + ["outside location"]
+    output = ui.ranking_changes(result, lambda k: k)
+    assert "1 entered and 1 left the shortlist" in output
+    assert ui.NO_MOVEMENT not in output
+    assert "experiment" not in output and "test ranking" not in output
+
+
+def test_rank_explanations_lead_with_actual_applied_signals():
+    result = run({"w_severity": 1.0, "w_trend": 1.0}, tune=False, constraints={"budget": 5, "recent_weight": 2})
+    output = ui.ranking_changes(result, lambda k: k)
+    assert ui.PRIORITY_NOTE in output
+    assert output.count('class="ranking-change"') <= 3
+    assert "Outside the current shortlist." in output
+    assert output.index('<p>') < output.index('class="rank-note"')
+    for mover in ui.changed_locations(result):
+        if mover["multi_vehicle"]:
+            assert f'{mover["multi_vehicle"]} multi-vehicle reports' in output
+        assert f'{mover["late"]} July–December reports receive 2× importance' in output
+    assert "dedicated" not in output
+
+
+def test_no_dense_validation_or_decorative_section_numbers_in_presentation():
+    at = app()
+    click(at, "Test ranking options automatically")
+    page = text(at)
+    assert "How your priorities affect the recommendations" in page
+    assert "What changed from ranking by crash totals?" not in page
+    assert "How we tested the ranking" not in page
+    assert 'class="sec-no"' not in page
+    assert 'class="dt trace"' not in page and 'class="dt validation"' not in page
+    assert not at.dataframe
+    result = at.session_state["last_result"]
+    assert len(result["agent_iterations"]) == 15
+    assert result["metrics"] and result["baseline"] and result["plan"]["points_total"]
+
+
+def test_summary_uses_only_current_counts_and_escapes_names():
+    result = run(tune=False, constraints={"region": "NE", "budget": 5})
+    result["top20"][0]["name"] = '<unsafe & location>'
+    output = ui.recommendation_summary(result)
+    assert "5 locations recommended in Northeast Calgary" in output
+    assert "Applied priorities: Crash totals" in output
+    assert "Deerfoot and Stoney excluded by location name" in output
+    assert '&lt;unsafe &amp; location&gt;' in output
+    assert "before area and road filters" in output
+    assert 'role="region"' in output and '<section' not in output

@@ -1,8 +1,42 @@
 from html import escape
+from base64 import b64encode
+from functools import lru_cache
 from pathlib import Path
 
-CSS = (Path(__file__).resolve().parent / "style.css").read_text()
+CSS_PATH = Path(__file__).resolve().parent / "style.css"
 REGIONS = {"NE": "Northeast", "NW": "Northwest", "SE": "Southeast", "SW": "Southwest"}
+PHOTO_CREDITS = ("Page photographs (illustrative scenes outside Calgary): "
+                 "[Frak Lopez / Unsplash](https://unsplash.com/photos/FI_jpaK_fzQ), "
+                 "[Unsplash License](https://unsplash.com/license); "
+                 "[Life Of Pix / Pexels](https://www.pexels.com/photo/man-wearing-hard-hat-standing-8159/), "
+                 "[Pexels License](https://www.pexels.com/license/). Cropped and resized for this page.")
+
+
+def theme_css(dark=False):
+    """Session-local palette; never mutates Streamlit's process-wide config."""
+    palette = ("--paper:#171e25;--paper-deep:#27323d;--card:#202a34;"
+               "--ink:#f0f4f8;--ink-soft:#c1ccd6;--ink-faint:#aebcc9;--rule:#465666;"
+               "--signal:#ff887b;--signal-wash:#392b30;--same:#8194a6;"
+               "--road-opacity:.10;--road-overlay:rgba(23,30,37,.40);--equipment-filter:brightness(.88);"
+               "--slider-track-filter:brightness(1.6);color-scheme:dark;" if dark else
+               "--paper:#f4f6f8;--paper-deep:#e8edf2;--card:#ffffff;"
+               "--ink:#202830;--ink-soft:#52606d;--ink-faint:#52606d;--rule:#d4dce4;"
+               "--signal:#b7322c;--signal-wash:#fcebea;--same:#738393;"
+               "--road-opacity:.12;--road-overlay:rgba(244,246,248,.25);--equipment-filter:none;"
+               "--slider-track-filter:none;color-scheme:light;")
+    # :root also reaches menus and tooltips mounted outside the app container.
+    # Read on reruns: the running checkout must not retain import-time CSS.
+    road = photo_uri("road-intersection-frak-lopez.jpg")
+    return (CSS_PATH.read_text() + "\n:root {" + palette + "}"
+            + ('\n[data-testid="stMainBlockContainer"]::before {background-image: '
+               f'linear-gradient(var(--road-overlay), var(--road-overlay)), url("{road}");}}' if road else ""))
+
+
+@lru_cache(maxsize=2)
+def photo_uri(filename):
+    """Embed small local JPEGs; missing assets leave a clean, usable header."""
+    path = Path(__file__).resolve().parent / "assets" / filename
+    return "data:image/jpeg;base64," + b64encode(path.read_bytes()).decode() if path.is_file() else ""
 
 
 def esc(value):
@@ -82,6 +116,16 @@ def location_evidence(row, result):
     return "; ".join(facts) + "." if facts else "Incident detail is unavailable in this sample output."
 
 
+def summary_reason(row, result):
+    """One factual reason per leading recommendation, with no technical score."""
+    if result["weights"]["w_severity"]:
+        return location_evidence(row, result)
+    if (result["weights"]["w_trend"] or
+            result.get("plan", {}).get("constraints", {}).get("recent_weight", 1) != 1):
+        return location_evidence(row, result)
+    return f"{row['incidents']} reported crashes; selected by total crash reports."
+
+
 def recommendation_summary(result):
     from app import planning
 
@@ -91,17 +135,55 @@ def recommendation_summary(result):
     area = f"{REGIONS[c['region']]} Calgary" if c["region"] else "All Calgary"
     road_scope = "Deerfoot and Stoney excluded by location name" if w["exclude_provincial"] else "Deerfoot and Stoney included"
     overview = f"{len(rows)} locations recommended in {area} · {road_scope}."
-    items = "".join(f'<li><b>{esc(r["name"])}</b> — {esc(location_evidence(r, result))}</li>' for r in rows[:3])
-    body = f'<ul>{items}</ul>' if rows else '<p>No locations qualify. Try another area or road scope.</p>'
-    return ('<section class="dt recommendation-summary" aria-label="Recommendation summary">'
+    items = "".join(f'<li><b>{esc(r["name"])}</b> — {esc(summary_reason(r, result))}</li>' for r in rows[:3])
+    body = f'<ul>{items}</ul>' if rows else '<p>No locations qualify for the applied area and road scope.</p>'
+    return ('<div class="dt recommendation-summary" role="region" aria-label="Recommendation summary">'
             '<h3>Recommendation summary</h3>'
             f'<p>{esc(overview)}</p><p>Applied priorities: {esc(planning.priority_description(settings))}.</p>'
             f'{body}<div class="summary-note">Location counts cover January–December 2025. '
-            'The crash total above covers the full cleaned dataset.</div></section>')
+            'The crash total above covers the full cleaned dataset, before area and road filters.</div></div>')
 
 
-NO_MOVEMENT = ("The ranking matches the list based on total crashes. "
-               "Change priorities or test ranking options to compare alternatives.")
+NO_MOVEMENT = "Your selected priorities recommend the same locations in the same order."
+PRIORITY_NOTE = "These changes reflect your selected priorities, not changes in actual crash frequency."
+
+
+def recommendation_change(result):
+    """Compare ordered recommendations, not just mover metadata or shared ranks."""
+    current = [r["location_key"] for r in recommended_rows(result)]
+    base = (result["plan"]["baseline_shortlist"] if result.get("plan") else
+            [r["location_key"] for r in result["baseline"]["top20"][:len(current)]])
+    if current == base:
+        return NO_MOVEMENT
+    if set(current) == set(base):
+        return "Your selected priorities recommend the same locations in a different order."
+    added, removed = len(set(current) - set(base)), len(set(base) - set(current))
+    return f"Your selected priorities change the recommended locations: {added} entered and {removed} left the shortlist."
+
+
+def priority_effect(row, result):
+    """Explain only applied score signals, without attributing a move to one signal."""
+    w = result["weights"]
+    c = result.get("plan", {}).get("constraints", {})
+    effects = []
+    if w["w_severity"]:
+        indicators = []
+        for key, label in (("pedestrian_or_cyclist", "pedestrian/cyclist reports"),
+                           ("multi_vehicle", "multi-vehicle reports"),
+                           ("multiple_lanes", "reports of multiple blocked lanes")):
+            if row.get(key):
+                indicators.append(f"{row[key]} {label}")
+        if indicators:
+            effects.append("Your incident priorities give additional importance to this location’s "
+                           + ", ".join(indicators) + ".")
+        elif all(key in row for key in ("pedestrian_or_cyclist", "multi_vehicle", "multiple_lanes")):
+            effects.append("No additional incident indicators are recorded here; other locations can receive extra importance for those reports.")
+    if w["w_trend"] and {"early", "late"} <= row.keys():
+        effects.append(f"Reports went from {row['early']} in January–June to {row['late']} in July–December; "
+                       "your priorities also consider later activity relative to earlier activity.")
+    if c.get("recent_weight", 1) != 1 and "late" in row:
+        effects.append(f"Its {row['late']} July–December reports receive {c['recent_weight']:g}× importance in crash counts and indicator points.")
+    return " ".join(effects) or "Its position reflects the combined applied priorities relative to other eligible locations."
 
 
 def changed_locations(result):
@@ -119,13 +201,15 @@ def changed_locations(result):
 
 def ranking_changes(result, name_of):
     changes = changed_locations(result)
+    context = recommendation_change(result)
     if not changes:
         if not result.get("plan") and any(r["rank"] != r["baseline_rank"] for r in result["top20"]):
             # The legacy sample has contradictory ranks and unchanged mover entries.
             return '<div class="dt empty">No consistent ranking-change details are available in this sample output.</div>'
-        return f'<div class="dt empty">{esc(NO_MOVEMENT)}</div>'
+        return f'<div class="dt empty">{esc(context)}</div>'
     current = {r["location_key"]: r for r in result["top20"]}
     baseline = {r["location_key"]: r for r in result["baseline"]["top20"]}
+    selected = {r["location_key"] for r in recommended_rows(result)}
     cards = []
     for mover in changes:
         key = mover["location_key"]
@@ -134,16 +218,20 @@ def ranking_changes(result, name_of):
         direction = "Moved higher" if mover["to_rank"] < mover["from_rank"] else "Moved lower"
         cards.append(
             '<article class="ranking-change">'
-            f'<h3>{esc(name_of(key))} — #{mover["from_rank"]} → #{mover["to_rank"]}</h3>'
-            f'<div class="change-direction">{direction}</div>'
-            f'<p>{esc(location_evidence(evidence, result))}</p></article>'
+            f'<h3>{esc(name_of(key))}</h3>'
+            f'<p>{esc(priority_effect(evidence, result))}</p>'
+            f'<div class="rank-note">{direction}: #{mover["from_rank"]} → #{mover["to_rank"]} '
+            '(total crashes → selected priorities).'
+            + (' Outside the current shortlist.' if key not in selected else '')
+            + '</div></article>'
         )
     from app import planning
     criteria = planning.priority_description(planning.from_result(result))
     return ('<div class="dt ranking-changes"><div class="change-context">'
-            f'From rank by total crashes → rank with current priorities. Applied criteria: {esc(criteria)}. '
-            'Counts describe the evidence used; movement also depends on other eligible locations.</div>'
-            + "".join(cards) + '</div>')
+            f'{esc(context)} Applied priorities: {esc(criteria)}. '
+            'The rank details compare the two top-20 lists, including locations outside your shortlist. '
+            'Positions depend on the combined criteria and other eligible locations.</div>'
+            + "".join(cards) + f'<p class="rank-note">{PRIORITY_NOTE}</p></div>')
 
 
 def validation(result):
@@ -206,10 +294,12 @@ def masthead():
 
 def hero(title, lede, data):
     before, accent, after = title
+    equipment = photo_uri("safety-vest-hardhat-life-of-pix.jpg")
+    imagery = (f'<img class="hero-equipment" src="{equipment}" alt="" aria-hidden="true" width="320" height="320">' if equipment else "")
     return (
-        f'<div class="dt hero"><div class="title" role="heading" aria-level="1">'
+        '<div class="dt hero"><div class="hero-copy"><div class="title" role="heading" aria-level="1">'
         f'{esc(before)}<em>{esc(accent)}</em>{esc(after)}</div>'
-        f'<div class="hero-side"><div class="lede">{esc(lede)}</div></div></div>'
+        f'<div class="hero-side"><div class="lede">{esc(lede)}</div></div></div>{imagery}</div>'
     )
 
 
@@ -254,7 +344,7 @@ def figures(result):
 
 def section(number, title, note=""):
     note_html = f'<div class="sec-note">{note}</div>' if note else ""
-    return (f'<div class="dt sec"><span class="sec-no">{number:02d}</span>'
+    return ('<div class="dt sec">'
             f'<div class="sec-title" role="heading" aria-level="2">{esc(title)}</div>{note_html}</div>')
 
 

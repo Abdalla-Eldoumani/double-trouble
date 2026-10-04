@@ -2,6 +2,29 @@
 
 DEFAULT_WEIGHTS = {"w_severity": 0.0, "w_trend": 0.0, "exclude_provincial": True}
 DEFAULT_CONSTRAINTS = {"recent_weight": 1.0, "region": None, "budget": 20}
+AREA_OPTIONS = {"ALL": "All Calgary", "NW": "Northwest", "NE": "Northeast",
+                "SW": "Southwest", "SE": "Southeast"}
+
+
+def engine_region(area):
+    """Translate the explicit UI selection without changing the engine contract."""
+    if area not in AREA_OPTIONS:
+        raise ValueError(f"Unknown area: {area!r}")
+    return None if area == "ALL" else area
+
+
+def ui_region(region):
+    return "ALL" if region is None else region
+
+
+def widget_values(settings):
+    """One-way mirrors of authoritative applied settings, before widget creation."""
+    c = settings["constraints"]
+    return {**settings["weights"], "area": ui_region(c["region"]),
+            "capacity": c["budget"], "recent_weight": c["recent_weight"],
+            "priorities": preset_name(settings)}
+
+
 PRESETS = {
     "Crash totals": (0.0, 0.0, 1.0),
     "Balanced priorities": (0.5, 0.5, 1.0),

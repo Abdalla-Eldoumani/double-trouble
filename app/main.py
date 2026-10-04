@@ -13,6 +13,16 @@ import streamlit as st
 from app import briefing, export, planning, ui
 from app.load import ResultShapeError, consistency_warnings, get_result
 
+# A long-lived Streamlit process can rerun this script while retaining an older
+# imported presentation module. Refresh only that module when its source changes;
+# session settings, cached results, and the ranking engine stay intact.
+ui_source = Path(ui.__file__).resolve()
+ui_mtime = ui_source.stat().st_mtime_ns
+if getattr(ui, "_source_mtime_ns", None) != ui_mtime:
+    from importlib import reload
+    reload(ui)
+    ui._source_mtime_ns = ui_mtime
+
 st.set_page_config(page_title="Calgary traffic-safety investigations", layout="wide")
 # Speech is a later project phase. Environment credentials alone never enable it.
 SPEECH_ENABLED = False
@@ -36,8 +46,10 @@ def clear_confirmation():
 def change_control(key):
     """Widget mirrors update only the named field in the authoritative settings."""
     clear_confirmation()
-    if key in ("area", "capacity", "recent_weight"):
-        field = {"area": "region", "capacity": "budget", "recent_weight": "recent_weight"}[key]
+    if key == "area":
+        ss.settings["constraints"]["region"] = planning.engine_region(ss.area)
+    elif key in ("capacity", "recent_weight"):
+        field = {"capacity": "budget", "recent_weight": "recent_weight"}[key]
         ss.settings["constraints"][field] = ss[key]
     elif key == "priorities":
         if ss.priorities in planning.PRESETS:
@@ -49,12 +61,9 @@ def change_control(key):
 
 
 def sync_widgets():
-    w, c = ss.settings["weights"], ss.settings["constraints"]
-    for key, value in w.items():
-        ss[key] = value
-    ss.area, ss.capacity, ss.recent_weight = c["region"], c["budget"], c["recent_weight"]
-    ss.priorities = planning.preset_name(ss.settings)
-    ss.constraints = dict(c)
+    for key, value in planning.widget_values(ss.settings).items():
+        if ss.get(key) != value:
+            ss[key] = value
 
 
 def request_tuning():
@@ -127,8 +136,13 @@ def apply_request(text):
     return result
 
 
-st.html(f"<style>{ui.CSS}</style>")
-st.markdown(ui.masthead(), unsafe_allow_html=True)
+ss.setdefault("dark_mode", False)
+mast_col, theme_col = st.columns([5, 1])
+with mast_col:
+    st.markdown(ui.masthead(), unsafe_allow_html=True)
+with theme_col:
+    st.toggle("Dark mode", key="dark_mode")
+st.html(f"<style>{ui.theme_css(ss.dark_mode)}</style>")
 try:
     if "settings" not in ss:
         result = get_result()
@@ -147,7 +161,11 @@ try:
         ss.settings = planning.from_result(result)
         ss.tuning_confirmation = "Ranking options tested. Updated: " + planning.summary(ss.settings) + "."
     if result is None:
-        result = get_result(ss.settings["weights"], tune=False, constraints=ss.settings["constraints"])
+        previous = ss.get("last_result")
+        # Theme, focus and export reruns retain the exact applied result (including
+        # its tuning trace). Settings changes still rerank through the engine.
+        result = (previous if previous and planning.from_result(previous) == ss.settings else
+                  get_result(ss.settings["weights"], tune=False, constraints=ss.settings["constraints"]))
 except ResultShapeError as exc:
     st.error(str(exc))
     st.stop()
@@ -168,8 +186,8 @@ st.markdown(ui.figures(result), unsafe_allow_html=True)
 controls_col, ask_col = st.columns([1, 1], gap="large")
 with controls_col, st.container(key="controls"):
     st.markdown(ui.card_head("Plan your investigation"), unsafe_allow_html=True)
-    st.selectbox("Area", [None, "NW", "NE", "SW", "SE"], key="area",
-                 format_func=lambda r: ui.REGIONS[r] if r else "All Calgary",
+    st.selectbox("Area", list(planning.AREA_OPTIONS), key="area",
+                 format_func=planning.AREA_OPTIONS.__getitem__,
                  on_change=change_control, args=("area",), disabled=not interactive)
     st.number_input("How many locations can your team investigate?", min_value=1, max_value=20,
                     step=1, key="capacity", on_change=change_control, args=("capacity",), disabled=not interactive)
@@ -202,7 +220,10 @@ if ss.get("tuning_confirmation"):
     st.success(ss.tuning_confirmation)
 where = f"{ui.REGIONS[region]} Calgary" if region else "Calgary"
 st.markdown(ui.section(1, "Recommended locations", f"Up to {budget} locations in {where}."), unsafe_allow_html=True)
-st.markdown(ui.recommendation_summary(result), unsafe_allow_html=True)
+with st.container(key="recommendation_summary"):
+    # Dedicated HTML rendering keeps the panel in normal flow and avoids
+    # Markdown rewriting its heading/list. Always use the current applied result.
+    st.html(ui.recommendation_summary(result))
 csv_data, csv_filename = export.shortlist_csv(result)
 st.download_button("Export investigation shortlist", data=csv_data, file_name=csv_filename,
                    mime="text/csv", disabled=not rows, on_click="ignore", key="export_shortlist")
@@ -218,14 +239,14 @@ else:
         selection_reason=[ui.location_reason(r, result) for r in reversed(rows)],
     )
     deck = pdk.Deck(
-        map_style=pdk.map_styles.LIGHT,
+        map_style=pdk.map_styles.DARK if ss.dark_mode else pdk.map_styles.LIGHT,
         initial_view_state=pdk.ViewState(latitude=float(shown["lat"].mean()), longitude=float(shown["lon"].mean()), zoom=11.2 if region else 10.4),
         layers=[
             pdk.Layer("ScatterplotLayer", data=points, get_position=["lon", "lat"], get_radius=18,
                       radius_units="'pixels'", get_fill_color=[184, 58, 27, 235], stroked=True,
                       get_line_color=[251, 249, 244], line_width_min_pixels=2, pickable=True),
             pdk.Layer("TextLayer", data=points, get_position=["lon", "lat"], get_text="label", get_size=14,
-                      get_color=[251, 249, 244], font_family="'Geist Mono, monospace'", font_weight=600,
+                      get_color=[255, 255, 255], font_family="'system-ui, sans-serif'", font_weight=600,
                       get_text_anchor="'middle'", get_alignment_baseline="'center'"),
         ],
         tooltip={"text": "#{rank} · {name}\n{incidents} reported crashes\n{pedestrian_or_cyclist} pedestrian/cyclist reports\n{selection_reason}",
@@ -240,45 +261,29 @@ else:
 
 st.markdown(ui.section(2, "Why these locations are priorities", "Reasons for the leading recommendations, based on reported incidents."), unsafe_allow_html=True)
 st.markdown(ui.movers(result, lambda k: briefing.display_name(names, k)), unsafe_allow_html=True)
-st.markdown(ui.section(3, "What changed from ranking by crash totals?",
-                       "Ranking positions across the two top-20 lists, not measured changes in road safety."), unsafe_allow_html=True)
+st.markdown(ui.section(3, "How your priorities affect the recommendations"), unsafe_allow_html=True)
 st.markdown(ui.ranking_changes(result, lambda k: briefing.display_name(names, k)), unsafe_allow_html=True)
 with st.expander("Advanced controls", expanded=False):
-    st.caption("These controls change ranking priorities; they do not filter out other crash types. Indicators come from reported descriptions, not confirmed injury severity.")
+    st.caption("These sliders change ranking priorities; they do not exclude other crash types. Indicators come from incident descriptions, not confirmed injury severity.")
     st.slider("Give more priority to pedestrian/cyclist and other crash indicators", 0.0, 1.0, step=0.05, key="w_severity", on_change=change_control, args=("w_severity",), disabled=not interactive,
               help="Higher values give extra importance to pedestrian/cyclist reports, multi-vehicle crashes, and crashes blocking multiple lanes.")
     st.caption("Higher values give extra importance to pedestrian/cyclist reports, multi-vehicle crashes, and crashes blocking multiple lanes.")
     st.slider("Give more priority to locations with increasing crashes", 0.0, 1.0, step=0.05, key="w_trend", on_change=change_control, args=("w_trend",), disabled=not interactive,
-              help="Higher values give extra importance to locations with more crashes in July–December than January–June 2025, using (later crashes + 1) / (earlier crashes + 1).")
-    st.caption("Higher values give extra importance to the ratio of July–December to January–June 2025 crashes, using (later crashes + 1) / (earlier crashes + 1).")
+              help="Higher values prioritize the smoothed ratio of July–December to January–June 2025 crash reports.")
+    st.caption("Prioritizes higher July–December activity relative to January–June 2025, with smoothing for small counts.")
     st.slider("Give more priority to recent crashes", 1.0, 5.0, step=0.5, key="recent_weight", on_change=change_control, args=("recent_weight",), disabled=not interactive,
               help="Higher values multiply July–December 2025 reports in both crash counts and incident-indicator points for the full-year ranking; January–June reports keep their usual importance.")
-    st.caption("Higher values multiply July–December 2025 reports in both crash counts and incident-indicator points for the full-year ranking. January–June reports keep their usual importance. This is separate from increasing activity.")
+    st.caption("Multiplies July–December 2025 counts and indicator points. January–June keeps its usual importance.")
     st.caption(f"Current weights: incident indicators {ss.w_severity:.2f}; increasing activity {ss.w_trend:.2f}; recency {ss.recent_weight:g}×.")
     st.button("Test ranking options automatically", on_click=request_tuning, type="primary", disabled=not interactive)
-    st.caption("Compares available weight settings using historical validation and selects the strongest result under that test. The search evaluates 20 locations and retains your area, road scope, and recency settings; your displayed capacity stays the same.")
-with st.expander("How we tested the ranking", expanded=False):
-    st.markdown(ui.validation(result), unsafe_allow_html=True)
-    st.markdown(ui.slope(result, lambda k: briefing.display_name(names, k), budget), unsafe_allow_html=True)
-    st.caption("Both lists use the same area, road exclusions, capacity, and January–December 2025 records. The crash-total list uses raw counts, without extra recency or incident weighting.")
-    st.dataframe(pd.DataFrame(rows).reindex(columns=["rank", "name", "incidents", "score", "baseline_rank"]).rename(columns={"rank": "Current rank", "name": "Location", "incidents": "Reported crashes", "score": "Custom ranking score", "baseline_rank": "Rank by total crashes"}), hide_index=True)
-    tuned = ss.get("tuned")
-    if tuned:
-        st.markdown("**Automatic ranking search**")
-        st.caption(f"Tested {len(tuned['agent_iterations'])} settings. Objective: maximize September–December proxy points at 20 locations selected from January–August. Ties keep simpler weights. This evaluation was used to choose weights.")
-        st.caption("Search settings: " + planning.summary(planning.from_result(tuned)))
-        st.caption(f"Selected weights: incident indicators {tuned['weights']['w_severity']:.2f}; increasing activity {tuned['weights']['w_trend']:.2f}.")
-        if planning.from_result(tuned) != ss.settings:
-            st.caption("These are results from a previous search. Your current settings have changed.")
-        st.markdown(ui.trace(tuned), unsafe_allow_html=True)
-    else:
-        st.caption("Automatic search has not run in this session. Current weights were supplied directly.")
-with st.expander("About the data", expanded=False):
+    st.caption("Selects weights using historical reports at 20 locations. Retains your area, road scope, recency, and displayed capacity. This tuning does not demonstrate crash reduction.")
+with st.expander("About the data and attribution", expanded=False):
     d = result["dataset"]
     st.markdown(f"{d['rows_loaded']:,} rows loaded, {d['rows_dropped']:,} dropped, {d['rows_used']:,} used. These counts cover the full dataset, before your area and road filters.")
     st.write(d["source"])
     st.write("Rows set aside: " + d["drop_reason"] + ". Records missing location, coordinates, date, or description are also excluded.")
     st.write("Location names are normalized and grouped; a group can represent a corridor or approximate cluster, rather than a verified intersection. Areas use the most frequently reported quadrant in each group.")
     st.markdown("Source: [City of Calgary Traffic Incidents](https://data.calgary.ca/Transportation-Transit/Traffic-Incidents/35ra-9556). Contains information licensed under the Open Government Licence – City of Calgary.")
+    st.markdown(ui.PHOTO_CREDITS)
 st.markdown(ui.footer(briefing.FOOTER, ""), unsafe_allow_html=True)
 ss.last_result = result

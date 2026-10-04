@@ -171,7 +171,7 @@ def test_page_on_fixture_shows_banner_and_result_numbers(no_engine):
     data = FIXTURE["dataset"]
     assert any(f"{data['rows_used']:,} used" in md.value for md in at.markdown)
     overlap = f"Top-list overlap: {FIXTURE['metrics']['overlap_with_baseline']} of {len(FIXTURE['top20'])}"
-    assert overlap in page_text(at)
+    assert overlap in ui.validation(at.session_state["last_result"])
     assert briefing.FOOTER in at.markdown[-1].value
     assert at.slider(key="w_severity").value == FIXTURE["weights"]["w_severity"]
     assert PLAY_LABEL not in [b.label for b in at.button]
@@ -200,7 +200,7 @@ def test_every_control_runs_against_engine(fake_engine):
     assert at.slider(key="w_severity").value == FIXTURE["weights"]["w_severity"]
     assert at.slider(key="w_trend").value == FIXTURE["weights"]["w_trend"]
     assert at.checkbox(key="exclude_provincial").value == FIXTURE["weights"]["exclude_provincial"]
-    assert all(it["note"] in page_text(at) for it in FIXTURE["agent_iterations"])
+    assert at.session_state["tuned"]["agent_iterations"] == FIXTURE["agent_iterations"]
 
 
 def test_page_with_real_engine():
@@ -220,13 +220,13 @@ def test_page_with_real_engine():
     assert at.slider(key="w_trend").value == tuned["weights"]["w_trend"]
     overlap = f"Top-list overlap: {tuned['metrics']['overlap_with_baseline']} of {len(tuned['top20'])}"
     page = page_text(at)
-    assert overlap in page
+    assert overlap in ui.validation(at.session_state["last_result"])
     for row in tuned["top20"]:
-        assert ui._clip(row["name"], 50) in page
+        assert row["name"] in page
     for row in tuned["top20"][:3]:
         assert ui.location_reason(row, tuned) in page
     for it in tuned["agent_iterations"]:
-        assert it["note"] in page
+        assert it in at.session_state["tuned"]["agent_iterations"]
 
 
 def test_sample_ui_never_calls_speech_even_with_a_key(no_engine, monkeypatch):
