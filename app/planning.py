@@ -62,7 +62,7 @@ def priority_description(settings):
     if c["recent_weight"] != 1:
         criteria.append(f"July–December 2025 reports weighted {c['recent_weight']:g}×")
     label = preset_name(settings)
-    return label + (": " + "; ".join(criteria) if criteria else "")
+    return label + (" (" + "; ".join(criteria) + ")" if criteria else "")
 
 
 def summary(settings):
