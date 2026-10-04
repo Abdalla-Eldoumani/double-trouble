@@ -89,7 +89,7 @@ def test_spoken_reply_uses_elevenlabs_when_a_key_is_set(monkeypatch):
             return iter([b"ID3", b"audio"])
 
     class FakeClient:
-        def __init__(self, api_key):
+        def __init__(self, api_key, **kwargs):
             self.text_to_speech = FakeTTS()
 
     monkeypatch.setattr("elevenlabs.client.ElevenLabs", FakeClient)
@@ -108,10 +108,17 @@ def test_transcribe_sends_audio_to_scribe(monkeypatch):
             return type("Transcript", (), {"text": "  only show northwest Calgary  "})()
 
     class FakeClient:
-        def __init__(self, api_key):
+        def __init__(self, api_key, **kwargs):
             self.speech_to_text = FakeSTT()
 
     monkeypatch.setattr("elevenlabs.client.ElevenLabs", FakeClient)
     audio = ("request.wav", b"RIFF", "audio/wav")
     assert briefing.transcribe(audio, "test-key-not-real") == "only show northwest Calgary"
-    assert sent == [{"file": audio, "model_id": briefing.STT_MODEL_ID}]
+    assert sent == [{"file": audio, "model_id": briefing.STT_MODEL_ID, "request_options": {"max_retries": 0}}]
+
+
+def test_voice_kill_switch_hides_the_key(monkeypatch):
+    monkeypatch.setenv("ELEVENLABS_API_KEY", "test-key-not-real")
+    assert briefing.api_key() == "test-key-not-real"
+    monkeypatch.setenv("DT_NO_VOICE", "1")
+    assert briefing.api_key() is None
