@@ -157,9 +157,9 @@ def mover_reason(row: pd.Series, avg: float, w: dict) -> str:
 
 
 @functools.lru_cache(maxsize=1)
-def _prepare(csv_mtime: float) -> tuple[pd.DataFrame, dict, pd.DataFrame]:
-    """Load and score the CSV once per file version; every run after that only re-ranks."""
-    df, info = load()
+def _prepare(loader, csv_mtime: float) -> tuple[pd.DataFrame, dict, pd.DataFrame]:
+    """Load and score the CSV once per file version and loader; every run after that only re-ranks."""
+    df, info = loader()
     df = add_points(df)
     places = df.groupby("location_key").agg(
         name=("display_name", lambda s: s.mode().iloc[0]),
@@ -177,7 +177,7 @@ def _prepare(csv_mtime: float) -> tuple[pd.DataFrame, dict, pd.DataFrame]:
 def run(weights: dict | None = None, tune: bool = True, constraints: dict | None = None) -> dict:
     w = check_weights(weights)
     c = check_constraints(constraints)
-    df, info, places = _prepare(CSV.stat().st_mtime)
+    df, info, places = _prepare(load, CSV.stat().st_mtime)
     keep = set(places.index[places["quadrant"] == c["region"]]) if c["region"] else None
     recent = c["recent_weight"]
 

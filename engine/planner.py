@@ -23,7 +23,7 @@ REGION_NAMES = {"NE": "northeast", "NW": "northwest", "SE": "southeast", "SW": "
 REGION_PATTERNS = {
     code: rf"\b(?:{name[:5]}[\s-]?{name[5:]}|{code.lower()})\b" for code, name in REGION_NAMES.items()
 }
-CITYWIDE = r"\b(?:all of calgary|whole city|entire city|city[\s-]?wide|every quadrant|all quadrants|everywhere)\b"
+CITYWIDE = r"\b(?:all (?:of )?calgary|whole city|entire city|city[\s-]?wide|every quadrant|all quadrants|everywhere)\b"
 # A number followed by a street word is an address ("look at 16 Avenue"), not a budget.
 NOT_STREET = r"(?!\s*(?:st|nd|rd|th)?\s*(?:avenue|ave|street|st|trail|drive|road|boulevard|blvd|way|gate)\b)"
 BUDGET = (
@@ -44,7 +44,7 @@ PROVINCIAL_IN = (
 )
 PROVINCIAL_OUT = r"\b(?:exclude|without|drop|remove|hide|no)\s+(?:the\s+)?(?:provincial|highways?|deerfoot|stoney)|city roads only"
 TUNE = (
-    r"\b(?:tune|optimi[sz]e|best weights|find the best|(?:you|agent|it|engine) (?:choose|pick|decide)s?"
+    r"\b(?:tune|optimi[sz]e|best weights|best ranking automatically|find the best|(?:you|agent|it|engine) (?:choose|pick|decide)s?"
     r"|let (?:the )?(?:agent|engine|it) (?:choose|pick|decide))\b"
 )
 RESET = r"\b(?:reset|start (?:over|again)|back to (?:the )?defaults?|default settings|clear (?:everything|all|settings))\b"

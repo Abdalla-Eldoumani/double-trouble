@@ -1,41 +1,19 @@
 [server]
-# Fonts ship with the app so the demo does not depend on venue internet.
 enableStaticServing = true
 
 [browser]
 gatherUsageStats = false
 
+# Supported native defaults; the in-app toggle applies a session-local CSS palette.
 [theme]
 base = "light"
-primaryColor = "#b83a1b"
-backgroundColor = "#f4f0e8"
-secondaryBackgroundColor = "#ebe5d9"
-textColor = "#1c1a17"
-borderColor = "#d9d1c2"
-font = "Geist, system-ui, sans-serif"
-headingFont = "Fraunces, Georgia, serif"
-codeFont = "'Geist Mono', ui-monospace, monospace"
-# Readable from the back of a room on a projector.
+primaryColor = "#b7322c"
+backgroundColor = "#f4f6f8"
+secondaryBackgroundColor = "#ffffff"
+textColor = "#202830"
+borderColor = "#d4dce4"
+font = "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+headingFont = "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+codeFont = "ui-monospace, SFMono-Regular, Consolas, monospace"
 baseFontSize = 18
-baseRadius = "8px"
-
-[[theme.fontFaces]]
-family = "Geist"
-url = "app/static/fonts/geist.woff2"
-weight = "100 900"
-
-[[theme.fontFaces]]
-family = "Geist Mono"
-url = "app/static/fonts/geist-mono.woff2"
-weight = "100 900"
-
-[[theme.fontFaces]]
-family = "Fraunces"
-url = "app/static/fonts/fraunces.woff2"
-weight = "100 900"
-
-[[theme.fontFaces]]
-family = "Fraunces"
-url = "app/static/fonts/fraunces-italic.woff2"
-weight = "100 900"
-style = "italic"
+baseRadius = "6px"

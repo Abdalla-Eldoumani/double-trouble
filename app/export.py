@@ -1,47 +1,45 @@
-"""The shortlist on screen as a CSV a traffic safety team can open in a spreadsheet."""
+"""CSV handoff of the applied result, with no session state or filesystem writes."""
 
 import pandas as pd
 
-from app.ui import REGIONS
+from app import planning, ui
 
 COLUMNS = [
-    "Rank", "Location", "Latitude", "Longitude", "Incidents", "Pedestrian or cyclist",
-    "Multi-vehicle", "More than one lane blocked", "Count-only rank", "Harm score", "Reason",
-    "Area", "Locations to visit", "Severity weight", "Trend weight", "Jul-Dec multiplier",
-    "Deerfoot and Stoney left out", "Data",
+    "Rank", "Location", "Latitude", "Longitude", "Reported crash count",
+    "Pedestrian/cyclist report count", "Rank by total crashes", "Selection reason",
+    "Data period", "Selected area", "Requested investigation capacity", "Actual shortlist size",
+    "Safety priorities", "Incident-indicator weight", "Increasing-activity weight",
+    "Recent-crash multiplier", "Deerfoot/Stoney excluded", "Road scope", "Data status",
 ]
-DATA_NOTE = ("City of Calgary Traffic Incidents, 2025, logged from traffic camera views; "
-             "Open Government Licence - City of Calgary")
-
-
-def shortlist_rows(result):
-    """The rows the page shows: the planner's shortlist when there is one, else the top 20."""
-    rows = sorted(result["top20"], key=lambda r: r["rank"])
-    plan = result.get("plan")
-    if plan:
-        keep = set(plan["shortlist"])
-        rows = [r for r in rows if r["location_key"] in keep]
-    return rows
 
 
 def shortlist_csv(result):
-    """UTF-8 with a byte-order mark so Excel reads accents and dashes; the name says what is inside."""
-    plan = (result.get("plan") or {}).get("constraints") or {}
-    region, budget = plan.get("region"), plan.get("budget", len(result["top20"]))
-    w = result["weights"]
-    rows = shortlist_rows(result)
-    sample = not result.get("plan")
-    records = [{
-        "Rank": r["rank"], "Location": r["name"], "Latitude": r["lat"], "Longitude": r["lon"],
-        "Incidents": r["incidents"], "Pedestrian or cyclist": r["pedestrian_or_cyclist"],
-        "Multi-vehicle": r.get("multi_vehicle"), "More than one lane blocked": r.get("multiple_lanes"),
-        "Count-only rank": r["baseline_rank"], "Harm score": r["score"], "Reason": r["reason"],
-        "Area": f"{REGIONS[region]} Calgary" if region else "All of Calgary", "Locations to visit": budget,
-        "Severity weight": w["w_severity"], "Trend weight": w["w_trend"],
-        "Jul-Dec multiplier": plan.get("recent_weight", 1.0),
-        "Deerfoot and Stoney left out": w["exclude_provincial"],
-        "Data": "Sample file, engine not connected" if sample else DATA_NOTE,
-    } for r in rows]
+    """Return Excel-friendly UTF-8 bytes and a filename based on actual area and size."""
+    settings = planning.from_result(result)
+    w, c = settings["weights"], settings["constraints"]
+    rows = ui.recommended_rows(result)
+    area = f"{ui.REGIONS[c['region']]} Calgary" if c["region"] else "All Calgary"
+    sample = not bool(result.get("plan"))
+    records = []
+    for row in rows:
+        records.append({
+            "Rank": row["rank"], "Location": row["name"],
+            "Latitude": row["lat"], "Longitude": row["lon"],
+            "Reported crash count": row["incidents"],
+            "Pedestrian/cyclist report count": row["pedestrian_or_cyclist"],
+            "Rank by total crashes": row["baseline_rank"],
+            "Selection reason": ui.location_reason(row, result),
+            "Data period": "January–December 2025", "Selected area": area,
+            "Requested investigation capacity": c["budget"], "Actual shortlist size": len(rows),
+            "Safety priorities": planning.priority_description(settings),
+            "Incident-indicator weight": w["w_severity"], "Increasing-activity weight": w["w_trend"],
+            "Recent-crash multiplier": c["recent_weight"],
+            "Deerfoot/Stoney excluded": w["exclude_provincial"],
+            "Road scope": "Exclude Deerfoot/Stoney by location name" if w["exclude_provincial"] else "Include Deerfoot/Stoney",
+            "Data status": "Sample output (engine not connected)" if sample else "Current engine result",
+        })
     data = pd.DataFrame(records, columns=COLUMNS).to_csv(index=False).encode("utf-8-sig")
-    name = f"calgary_safety_shortlist_2025_{region or 'citywide'}_top{len(rows)}{'_sample' if sample else ''}.csv"
-    return data, name
+    region = c["region"] or "AllCalgary"
+    suffix = "_sample" if sample else ""
+    filename = f"calgary_investigation_shortlist_2025_{region}_top{len(rows)}{suffix}.csv"
+    return data, filename

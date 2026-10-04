@@ -1,0 +1,24 @@
+{
+  "visual_checks": "passed",
+  "desktop": [
+    1440,
+    1050
+  ],
+  "mobile": [
+    390,
+    844
+  ],
+  "csv_identical_across_themes": true,
+  "download_bytes": 6703,
+  "captions": {
+    "light": {
+      "color": "rgb(82, 96, 109)",
+      "opacity": "1"
+    },
+    "dark": {
+      "color": "rgb(193, 204, 214)",
+      "opacity": "1"
+    }
+  },
+  "page_errors": []
+}

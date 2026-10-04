@@ -1,8 +1,7 @@
-import math
 import sys
 from pathlib import Path
 
-# streamlit run puts app/ on the path, not the repo root, and the engine lives at the root.
+# streamlit run puts app/ on the path, not the repo root.
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -11,57 +10,66 @@ import pandas as pd
 import pydeck as pdk
 import streamlit as st
 
-from app import briefing, export, ui
+from app import briefing, export, planning, ui
 from app.load import ResultShapeError, consistency_warnings, get_result
 
-st.set_page_config(page_title="Calgary safety shortlist", layout="wide")
+# A long-lived Streamlit process can rerun this script while retaining an older
+# imported presentation/speech modules. Refresh those when their source changes;
+# session settings, cached results, and the ranking engine stay intact.
+for presentation_module in (ui, briefing):
+    source_mtime = Path(presentation_module.__file__).resolve().stat().st_mtime_ns
+    if getattr(presentation_module, "_source_mtime_ns", None) != source_mtime:
+        from importlib import reload
+        reload(presentation_module)
+        presentation_module._source_mtime_ns = source_mtime
 
-TITLE = ("Which Calgary locations keep ", "hurting", " people?")
-LEDE = ("A plain count treats a fender bender like a call where EMS met a pedestrian. This one ranks 2025 "
-        "traffic incidents by a harm score read from the City's own incident text, then tests its weights "
-        "against what happened later in the year.")
+st.set_page_config(page_title="Calgary traffic-safety investigations", layout="wide")
+TITLE = ("Where should Calgary focus its next ", "traffic-safety", " investigation?")
+LEDE = ("Use Calgary’s 2025 reported crash incidents to shortlist locations for investigation. "
+        "Choose your area, available investigation capacity, and safety priorities to see where to focus and why.")
 EXAMPLES = [
-    ("Northwest, top 5, recent \u00d72",
-     "Prioritize recent incidents twice as much, only show northwest Calgary, "
-     "and assume we can only investigate five locations."),
-    ("Now the northeast", "Now show me the northeast instead."),
-    ("Plain count only", "Just count incidents, ignore severity."),
-    ("Reset", "Reset."),
+    ("Pedestrians and cyclists", "Focus on pedestrians and cyclists."),
+    ("Top 10 citywide", "Top 10 across the whole city."),
+    ("City roads only", "City roads only."),
 ]
-# One accent for harm; "moved down" is a hollow ink ring so colour is never the only cue.
-FILL = {"up": [184, 58, 27, 235], "down": [251, 249, 244, 245], "same": [163, 156, 142, 235]}
-LINE = {"up": [251, 249, 244], "down": [28, 26, 23], "same": [251, 249, 244]}
-LABEL = {"up": [251, 249, 244], "down": [28, 26, 23], "same": [251, 249, 244]}
-ALL_AREAS = "All of Calgary"
+PLACEHOLDER = "We can investigate five locations in northwest Calgary. Give recent crashes twice the importance."
 ss = st.session_state
+# Retain reviewed text even when the compact voice option is closed and its
+# widget is temporarily absent. Theme reruns must never erase that draft.
+ss.voice_transcript = ss.get("voice_transcript", "")
 
 
-def set_weights(weights):
-    ss.w_severity = float(weights["w_severity"])
-    ss.w_trend = float(weights["w_trend"])
-    ss.exclude_provincial = bool(weights["exclude_provincial"])
+def clear_confirmation():
+    ss.pop("reply", None)
+    ss.pop("tuning_confirmation", None)
 
 
-def current_weights():
-    return {"w_severity": ss.w_severity, "w_trend": ss.w_trend,
-            "exclude_provincial": ss.exclude_provincial}
+def change_control(key):
+    """Widget mirrors update only the named field in the authoritative settings."""
+    clear_confirmation()
+    if key == "area":
+        ss.settings["constraints"]["region"] = planning.engine_region(ss.area)
+    elif key in ("capacity", "recent_weight"):
+        field = {"capacity": "budget", "recent_weight": "recent_weight"}[key]
+        ss.settings["constraints"][field] = ss[key]
+    elif key == "priorities":
+        if ss.priorities in planning.PRESETS:
+            severity, trend, recent = planning.PRESETS[ss.priorities]
+            ss.settings["weights"].update(w_severity=severity, w_trend=trend)
+            ss.settings["constraints"]["recent_weight"] = recent
+    else:
+        ss.settings["weights"][key] = ss[key]
+
+
+def sync_widgets():
+    for key, value in planning.widget_values(ss.settings).items():
+        if ss.get(key) != value:
+            ss[key] = value
 
 
 def request_tuning():
-    clear_reply()
+    clear_confirmation()
     ss.tune_requested = True
-
-
-def clear_reply():
-    # A reply describes the request that made it; once the controls move it is out of date.
-    ss.pop("reply", None)
-
-
-def set_scope():
-    """Area and budget are planner constraints, so the controls and typed requests stay in step."""
-    clear_reply()
-    ss.constraints = {**(ss.get("constraints") or {}),
-                      "region": None if ss.area == ALL_AREAS else ss.area, "budget": int(ss.budget)}
 
 
 def submit_typed():
@@ -75,290 +83,252 @@ def submit_example(text):
     ss.pending_request = text
 
 
-def submit_voice():
-    audio = ss.get("planner_audio")
-    if audio is None:
-        return
-    try:
-        text = briefing.transcribe(("request.wav", audio.getvalue(), "audio/wav"), briefing.api_key())
-    except Exception as exc:
-        ss.planner_error = f"Speech to text failed ({type(exc).__name__}). Type the request instead."
-        return
+def submit_reviewed_voice():
+    text = ss.get("voice_transcript", "").strip()
     if text:
-        ss.planner_text = text
+        ss.pop("transcription_error", None)
         ss.pending_request = text
     else:
-        ss.planner_error = "No speech was picked up. Try again or type the request."
+        ss.transcription_error = "Enter or transcribe a request before applying it."
 
 
 def apply_request(text):
-    """Parse the request, re-rank with it, and keep a spoken reply that compares old and new."""
-    from engine.agent import DEFAULT_WEIGHTS
-    from engine.planner import compare, explain, parse
+    from engine.planner import compare, parse
 
     asked = parse(text)
+    clear_confirmation()
+    recognized = bool(asked["constraints"] or asked["weights"] or asked["reset"] or asked["tune"])
     if asked["reset"]:
-        constraints, weights = dict(asked["constraints"]), dict(ss.get("default_weights") or DEFAULT_WEIGHTS)
-        if "opening" in ss:
-            ss.tuned = ss.opening
+        weights, constraints = dict(planning.DEFAULT_WEIGHTS), dict(planning.DEFAULT_CONSTRAINTS)
     else:
-        constraints = {**(ss.get("constraints") or {}), **asked["constraints"]}
-        weights = {**current_weights(), **asked["weights"]}
-    ss.constraints = constraints
+        weights = {**ss.settings["weights"], **asked["weights"]}
+        constraints = {**ss.settings["constraints"], **asked["constraints"]}
     result = get_result(weights, tune=asked["tune"], constraints=constraints)
+    ss.settings = planning.from_result(result)
     if asked["tune"]:
         ss.tuned = result
-    set_weights(result["weights"])
     previous = ss.get("last_result")
     if previous is not None and "plan" not in previous:
         previous = None
-    reply = {"request": text, "text": explain(result, compare(previous, result), asked["heard"])}
-    key = briefing.api_key()
-    if key:
-        try:
-            reply["audio"], reply["fresh"] = briefing.synthesize(reply["text"], key), True
-        except Exception as exc:
-            reply["audio_error"] = f"Audio failed ({type(exc).__name__}). The reply is above."
+    reply = {"request": text, "text": (
+        ("Ranking options tested. Updated: " if asked["tune"] else "Updated: ") + planning.summary(ss.settings) + "." if recognized else
+        "Settings unchanged. Try an area, a number of locations, pedestrian/cyclist priorities, "
+        "recent crash weighting, or road exclusions."
+    )}
+    if result.get("plan"):
+        reply["comparison"] = compare(previous, result)
     ss.reply = reply
     return result
 
 
-def fit_view(points, height, width=560):
-    """Centre and zoom so every pin fits, with a margin; a fixed zoom dropped pins off the edge."""
-    lat_lo, lat_hi = points["lat"].min(), points["lat"].max()
-    lon_lo, lon_hi = points["lon"].min(), points["lon"].max()
-    lat_span = max((lat_hi - lat_lo) / math.cos(math.radians((lat_lo + lat_hi) / 2)), 1e-3)
-    zoom = min(math.log2(0.75 * height * 360 / (512 * lat_span)),
-               math.log2(0.75 * width * 360 / (512 * max(lon_hi - lon_lo, 1e-3))), 13.0)
-    return pdk.ViewState(latitude=float((lat_lo + lat_hi) / 2), longitude=float((lon_lo + lon_hi) / 2), zoom=zoom)
-
-
-def movement(row):
-    if row["rank"] < row["baseline_rank"]:
-        return "up"
-    if row["rank"] > row["baseline_rank"]:
-        return "down"
-    return "same"
-
-
-def weight_state(constraints):
-    weights = current_weights()
-    tuned = ss.get("tuned")
-    if tuned and tuned["weights"] == weights and tuned.get("plan", {}).get("constraints") == constraints:
-        return "Chosen by the agent", True
-    if weights["w_severity"] == 0 and weights["w_trend"] == 0:
-        return "Count only", False
-    return "Set by hand", False
-
-
-st.html(f"<style>{ui.CSS}</style>")
-st.markdown(ui.masthead(), unsafe_allow_html=True)
-
-request = ss.pop("pending_request", None)
+ss.setdefault("dark_mode", False)
+mast_col, theme_col = st.columns([5, 1])
+with mast_col:
+    st.markdown(ui.masthead(), unsafe_allow_html=True)
+with theme_col:
+    st.toggle("Dark mode", key="dark_mode")
+st.html(f"<style>{ui.theme_css(ss.dark_mode)}</style>")
 try:
-    first_load = "w_severity" not in ss
-    if first_load:
-        # Open on the agent's own choice, so the first screen shows what it changed and why.
-        result = get_result(tune=True)
-        ss.tuned = ss.opening = result
-        set_weights(result["weights"])
-        ss.default_weights = current_weights()
+    if "settings" not in ss:
+        result = get_result()
+        ss.settings = planning.from_result(result)
+    else:
+        result = None
+    request = ss.pop("pending_request", None)
     if request is not None:
         try:
             result = apply_request(request)
         except ImportError:
-            st.warning("The planner needs the engine, which is not connected.")
-            result = get_result(current_weights(), tune=False)
+            st.warning("The typed planner needs the connected engine. Sample settings were left unchanged.")
     elif ss.pop("tune_requested", False):
-        # Tune within the user's provincial choice and planner constraints, not the defaults.
-        result = get_result({"exclude_provincial": ss.exclude_provincial}, tune=True,
-                            constraints=ss.get("constraints"))
+        result = get_result(ss.settings["weights"], tune=True, constraints=ss.settings["constraints"])
         ss.tuned = result
-        set_weights(result["weights"])
-    elif not first_load:
-        result = get_result(current_weights(), tune=False, constraints=ss.get("constraints"))
+        ss.settings = planning.from_result(result)
+        ss.tuning_confirmation = "Ranking options tested. Updated: " + planning.summary(ss.settings) + "."
+    if result is None:
+        previous = ss.get("last_result")
+        # Theme, focus and export reruns retain the exact applied result (including
+        # its tuning trace). Settings changes still rerank through the engine.
+        result = (previous if previous and planning.from_result(previous) == ss.settings else
+                  get_result(ss.settings["weights"], tune=False, constraints=ss.settings["constraints"]))
 except ResultShapeError as exc:
     st.error(str(exc))
     st.stop()
 
+ss.settings = planning.from_result(result)
+sync_widgets()
 for problem in consistency_warnings(result):
     st.warning(f"Result check: {problem}")
-
-names = briefing.location_names(result)
-if result.get("plan"):
-    # Mirror whatever the planner or a reset decided before the widgets are drawn.
-    ss.area = result["plan"]["constraints"]["region"] or ALL_AREAS
-    ss.budget = result["plan"]["constraints"]["budget"]
-else:
-    ss.setdefault("area", ALL_AREAS)
-    ss.setdefault("budget", len(result["top20"]))
-
-
-def name_of(key):
-    return briefing.display_name(names, key)
-
-
 plan = result.get("plan")
-budget = plan["constraints"]["budget"] if plan else len(result["top20"])
+interactive = bool(plan)
+speech_key = briefing.api_key() if interactive else None
+speech_config = briefing.speech_config() if interactive else None
+rows = ui.recommended_rows(result)
+budget = plan["constraints"]["budget"] if plan else len(rows)
 region = plan["constraints"]["region"] if plan else None
-
+names = briefing.location_names(result)
 st.markdown(ui.hero(TITLE, LEDE, result["dataset"]), unsafe_allow_html=True)
 st.markdown(ui.figures(result), unsafe_allow_html=True)
+st.html(ui.recommendation_link())
 
-ask_col, weights_col = st.columns([1.3, 1], gap="large")
+controls_col, ask_col = st.columns([1, 1], gap="large")
+with controls_col, st.container(key="controls"):
+    st.markdown(ui.card_head("Plan your investigation"), unsafe_allow_html=True)
+    st.selectbox("Area", list(planning.AREA_OPTIONS), key="area",
+                 format_func=planning.AREA_OPTIONS.__getitem__,
+                 on_change=change_control, args=("area",), disabled=not interactive)
+    st.number_input("How many locations can your team investigate?", min_value=1, max_value=20,
+                    step=1, key="capacity", on_change=change_control, args=("capacity",), disabled=not interactive)
+    st.selectbox("Safety priorities", [*planning.PRESETS, "Custom priorities"], key="priorities",
+                 on_change=change_control, args=("priorities",), disabled=not interactive)
+    st.caption(planning.PRESET_NOTES[ss.priorities])
+    st.checkbox("Exclude Deerfoot and Stoney locations", key="exclude_provincial",
+                on_change=change_control, args=("exclude_provincial",), disabled=not interactive,
+                help="Excludes grouped location names containing Deerfoot or Stoney; it does not verify road ownership.")
+    st.button("Reset settings", on_click=submit_example, args=("Reset.",), disabled=not interactive)
+    st.caption("Reset: all Calgary, up to 20 locations, crash totals, Deerfoot and Stoney excluded.")
 with ask_col, st.container(key="planner"):
-    st.markdown(ui.card_head("Ask the planner", "Say or type what the traffic safety team can afford to "
-                             "look at. The engine reranks and says what changed."),
-                unsafe_allow_html=True)
-    voice_key = briefing.api_key()
-    if voice_key:
-        st.audio_input("Speak a request", key="planner_audio", on_change=submit_voice)
+    st.markdown(ui.card_head("Ask the planner", "Tell the planner your investigation capacity, area, or safety priorities."), unsafe_allow_html=True)
     with st.form("planner_form", border=False):
-        typed, go = st.columns([3, 1.1], vertical_alignment="bottom")
-        typed.text_input("Type a request", key="planner_text", placeholder=EXAMPLES[0][1])
-        go.form_submit_button("Run request", on_click=submit_typed, type="primary", width="stretch")
-    for pair in (EXAMPLES[:2], EXAMPLES[2:]):
-        for col, (label, text) in zip(st.columns(2, gap="small"), pair):
-            col.button(label, on_click=submit_example, args=(text,), key=f"example_{label}",
-                       type="tertiary", width="stretch")
-    st.markdown('<div class="dt card-note quiet">It understands an area (northeast, NW...), how many '
-                'locations, recent incidents counted twice or more, pedestrians and cyclists, count only, '
-                'Deerfoot and Stoney in or out, "tune it" and "reset".</div>', unsafe_allow_html=True)
-    if "planner_error" in ss:
-        st.error(ss.pop("planner_error"))
+        st.text_input("Your planning request", key="planner_text", placeholder=PLACEHOLDER, disabled=not interactive)
+        st.form_submit_button("Update recommendations", on_click=submit_typed, type="primary", width="stretch", disabled=not interactive)
+    st.caption("Try a supported request:")
+    for label, text in EXAMPLES:
+        st.button(label, on_click=submit_example, args=(text,), key=f"example_{label}", type="tertiary", width="stretch", disabled=not interactive)
+    if interactive:
+        st.toggle("Speak your request", key="voice_open")
+        if not speech_key:
+            st.caption("Speech is optional. Add ELEVENLABS_API_KEY to .streamlit/secrets.toml or the environment to enable it. Typed planning works without a key.")
+        if ss.get("voice_open"):
+            st.caption("Record up to 90 seconds. If the microphone is unavailable, allow microphone access in your browser and use localhost or HTTPS, or type your request.")
+            recording = st.audio_input("Record a planning request", key="planner_audio", disabled=not speech_key,
+                                       help="Audio is sent to ElevenLabs only when you click Transcribe recording.")
+            data = recording.getvalue() if recording is not None else None
+            recording_key = briefing.recording_id(data, speech_config["stt_model"]) if data is not None else None
+            completed = ss.get("completed_transcription", {})
+            if recording_key != ss.get("recording_seen"):
+                ss.recording_seen = recording_key
+                ss.pop("transcription_error", None)
+                if recording_key is not None:
+                    ss.voice_transcript = completed.get("text", "") if completed.get("recording_id") == recording_key else ""
+            already_transcribed = recording_key is not None and completed.get("recording_id") == recording_key
+            if st.button("Transcribe recording", key="transcribe_recording", disabled=not speech_key or data is None or already_transcribed) and not already_transcribed:
+                ss.pop("transcription_error", None)
+                with st.spinner("Transcribing recording…"):
+                    try:
+                        transcript = briefing.transcribe(data, speech_key, model_id=speech_config["stt_model"])
+                    except briefing.SpeechError as exc:
+                        ss.transcription_error = str(exc)
+                    else:
+                        ss.voice_transcript = transcript
+                        ss.completed_transcription = {"recording_id": recording_key, "text": transcript}
+            if ss.get("transcription_error"):
+                st.warning(ss.transcription_error)
+            if already_transcribed:
+                st.caption("This recording is transcribed. Review or edit the text, then apply it.")
+            # Outside a form so edited text is retained on focus/theme reruns.
+            # Applying is still a separate, explicit planner action.
+            st.text_area("Review transcription", key="voice_transcript", height=100,
+                         help="Edit road names or settings before applying. Nothing is applied automatically.")
+            st.button("Apply request", on_click=submit_reviewed_voice, width="stretch")
+            st.caption('Supported examples: “Show the top 20 locations in northeast Calgary.” “Give pedestrian and cyclist crashes more importance.” “Exclude Deerfoot and Stoney Trail.” “Now show all Calgary.” “Find the best ranking automatically.”')
+    if ss.get("reply"):
+        st.markdown(ui.reply(ss.reply), unsafe_allow_html=True)
 
-with weights_col, st.container(key="controls"):
-    state, agent_set = weight_state(plan["constraints"] if plan else None)
-    st.markdown(ui.card_head("How much should harm count?", state=state, agent_set=agent_set),
-                unsafe_allow_html=True)
-    scoped = bool(result.get("plan"))
-    area_col, budget_col = st.columns([1, 1.25], gap="medium")
-    area_col.selectbox("Area", [ALL_AREAS, *ui.REGIONS], key="area", on_change=set_scope,
-                       format_func=lambda a: ui.REGIONS.get(a, a), disabled=not scoped)
-    budget_col.slider("Locations to visit", 1, 20, key="budget", on_change=set_scope,
-                      disabled=not scoped)
-    st.slider("Severity weight", 0.0, 1.0, step=0.05, key="w_severity", on_change=clear_reply,
-              help="Harm score per incident: 1, plus 3 when the text names a pedestrian or cyclist, plus 1 for "
-                   "multi-vehicle, plus 1 for more than one lane blocked. Keyword-based: the feed has no injury field.")
-    st.slider("Trend weight", 0.0, 1.0, step=0.05, key="w_trend", on_change=clear_reply,
-              help="How much a rise from the first half of 2025 to the second lifts a location. "
-                   "To count recent incidents more, ask the planner.")
-    st.checkbox("Leave out Deerfoot and Stoney Trail", key="exclude_provincial", on_change=clear_reply,
-                help="The Government of Alberta maintains both roads. Matched by name, so the City-road "
-                     "legs of those interchanges drop out too.")
-    st.button("Let the agent tune it", on_click=request_tuning, type="primary", width="stretch")
-
-# The reply sits full width under both cards, so the cards stay level and the map stays in view.
-if ss.get("reply"):
-    reply = ss.reply
-    with st.container(key="answer"):
-        st.markdown(ui.reply(reply, ui.plan_tags(plan)), unsafe_allow_html=True)
-        if reply.get("audio"):
-            st.audio(reply["audio"], format="audio/mpeg", autoplay=reply.pop("fresh", False))
-        if reply.get("audio_error"):
-            st.caption(reply["audio_error"])
-
-# 01: the shortlist
+if not interactive:
+    st.caption("Sample output: planning controls are unavailable until the engine is connected. These are illustrative recommendations.")
+if ss.get("tuning_confirmation"):
+    st.success(ss.tuning_confirmation)
 where = f"{ui.REGIONS[region]} Calgary" if region else "Calgary"
-st.markdown(ui.section(1, f"Top {budget} on the map",
-                       f"The shortlist for {where} at the current settings. The bar under each row "
-                       "is its harm score."),
-            unsafe_allow_html=True)
-top = pd.DataFrame(result["top20"]).sort_values("rank")
-top["move"] = top.apply(movement, axis=1)
-shown = top.head(budget)
-# Drawn last means drawn on top, so rank 1 stays visible where circles overlap.
-points = shown.sort_values("rank", ascending=False).assign(
-    fill=lambda d: d["move"].map(FILL),
-    line=lambda d: d["move"].map(LINE),
-    text_colour=lambda d: d["move"].map(LABEL),
-    radius=lambda d: 11 + 11 * d["score"] / d["score"].max(),
-    label=lambda d: d["rank"].astype(str),
-)
-map_height = max(420, 44 * len(shown) + 64)
-deck = pdk.Deck(
-    map_style=pdk.map_styles.LIGHT,
-    initial_view_state=fit_view(shown, map_height),
-    layers=[
-        pdk.Layer("ScatterplotLayer", data=points, get_position=["lon", "lat"],
-                  get_radius="radius", radius_units="'pixels'", get_fill_color="fill",
-                  stroked=True, get_line_color="line", line_width_min_pixels=2, pickable=True),
-        pdk.Layer("TextLayer", data=points, get_position=["lon", "lat"], get_text="label",
-                  get_size=14, get_color="text_colour", font_family="'Geist Mono, monospace'",
-                  font_weight=600, get_text_anchor="'middle'", get_alignment_baseline="'center'"),
-    ],
-    tooltip={
-        "html": "<b>{name}</b><br/>Rank {rank}, count-only rank {baseline_rank}<br/>"
-                "{incidents} incidents, {pedestrian_or_cyclist} pedestrian or cyclist<br/>"
-                "<span style='opacity:.75'>{reason}</span>",
-        "style": {"backgroundColor": "#1c1a17", "color": "#f4f0e8", "fontFamily": "Geist, sans-serif",
-                  "fontSize": "14px", "lineHeight": "1.45", "padding": "12px 14px",
-                  "borderRadius": "8px", "maxWidth": "340px"},
-    },
-)
-map_col, list_col = st.columns([1.05, 1], gap="large")
-with map_col:
-    st.pydeck_chart(deck, height=map_height)
-    st.markdown(ui.legend(), unsafe_allow_html=True)
-with list_col:
-    st.markdown(ui.shortlist(shown.to_dict("records")), unsafe_allow_html=True)
-    csv_data, csv_name = export.shortlist_csv(result)
-    # "ignore" keeps the download from rerunning the page and re-ranking.
-    st.download_button("Download this shortlist (CSV)", data=csv_data, file_name=csv_name, mime="text/csv",
-                       on_click="ignore", key="export_shortlist", type="tertiary")
-
-# 02: movers
-st.markdown(ui.section(2, "Why it moved", "The three biggest rank changes against a plain incident count, "
-                       "explained from the incident descriptions."),
-            unsafe_allow_html=True)
-st.markdown(ui.movers(result, name_of), unsafe_allow_html=True)
-
-# 03: count-only against harm
-overlap = plan["overlap"] if plan else result["metrics"]["overlap_with_baseline"]
-st.markdown(ui.section(3, f"{overlap} of {len(shown)} the same as count-only",
-                       f"Left, the {budget} locations with the most incidents. Right, the {budget} with "
-                       "the highest harm score. Lines join the same place; red lines climbed."),
-            unsafe_allow_html=True)
-st.markdown(ui.slope(result, name_of, budget), unsafe_allow_html=True)
-
-# 04: the agent's search
-if "tuned" in ss:
-    tuned = ss.tuned
-    its = tuned["agent_iterations"]
-    kept = sum(it["note"].startswith("kept") for it in its)
-    w = tuned["weights"]
-    n = tuned["plan"]["constraints"]["budget"] if tuned.get("plan") else len(tuned["top20"])
-    note = (f"Plan: {len(its)} weight settings, simplest first. Test: rank on Jan-Aug, then count the Sep-Dec "
-            f"severity points its top {n} would have caught. Revise: keep a setting only when it catches "
-            f"strictly more, so ties stay with the simpler one. {kept} of {len(its) - 1} changes were kept. "
-            f"Chosen: severity {w['w_severity']:.2f}, trend {w['w_trend']:.2f}.")
-    if w != current_weights():
-        note += " The sliders have changed since that run."
-    elif plan and tuned.get("plan") and tuned["plan"]["constraints"] != plan["constraints"]:
-        note += " That run was for a different area or budget; press Let the agent tune it to re-run."
-    st.markdown(ui.section(4, "How the agent chose", note), unsafe_allow_html=True)
-    st.markdown(ui.trace(tuned), unsafe_allow_html=True)
+st.markdown(ui.section(1, "Recommended locations", f"Up to {budget} locations in {where}."), unsafe_allow_html=True)
+with st.container(key="recommendation_summary"):
+    # Dedicated HTML rendering keeps the panel in normal flow and avoids
+    # Markdown rewriting its heading/list. Always use the current applied result.
+    st.html(ui.recommendation_summary(result))
+    if interactive:
+        current_briefing = briefing.briefing_id(result, speech_config)
+        if ss.get("summary_audio", {}).get("briefing_id") != current_briefing:
+            ss.pop("summary_audio", None)
+        if ss.get("speech_error_id") != current_briefing:
+            ss.pop("speech_error", None)
+        if st.button("Read summary aloud", key="read_summary", disabled=not speech_key,
+                     help="Generate an optional spoken summary with ElevenLabs. Use the player to listen."):
+            ss.pop("speech_error", None)
+            if not ss.get("summary_audio"):
+                with st.spinner("Preparing spoken summary…"):
+                    try:
+                        audio = briefing.synthesize(briefing.build_script(result), speech_key,
+                                                   voice_id=speech_config["voice_id"], model_id=speech_config["tts_model"])
+                    except briefing.SpeechError as exc:
+                        ss.speech_error = str(exc)
+                        ss.speech_error_id = current_briefing
+                    else:
+                        ss.summary_audio = {"briefing_id": current_briefing, "bytes": audio}
+        if ss.get("speech_error"):
+            st.warning(ss.speech_error)
+        if ss.get("summary_audio"):
+            st.caption("Spoken summary of the current recommendations. Press play to listen.")
+            st.audio(ss.summary_audio["bytes"], format="audio/mpeg", autoplay=False)
+csv_data, csv_filename = export.shortlist_csv(result)
+st.download_button("Export investigation shortlist", data=csv_data, file_name=csv_filename,
+                   mime="text/csv", disabled=not rows, on_click="ignore", key="export_shortlist")
+if len(rows) < budget:
+    st.info(f"{len(rows)} locations qualify for the requested {budget}. Only locations with retained crash records "
+            "in the selected area and road scope can be recommended.")
+if not rows:
+    st.info("No locations qualify. Try another area or include Deerfoot and Stoney locations.")
 else:
-    st.markdown(ui.section(4, "How the agent chose"), unsafe_allow_html=True)
-    st.markdown('<div class="dt empty"><b>The agent has not run yet.</b> '
-                'Press "Let the agent tune it" and it will rank on January to August, score each '
-                'weight setting on September to December, and keep only the settings that catch '
-                'more later severity points.</div>', unsafe_allow_html=True)
+    shown = pd.DataFrame(rows)
+    points = shown.sort_values("rank", ascending=False).assign(
+        label=lambda d: d["rank"].astype(str),
+        selection_reason=[ui.location_reason(r, result) for r in reversed(rows)],
+    )
+    deck = pdk.Deck(
+        map_style=pdk.map_styles.DARK if ss.dark_mode else pdk.map_styles.LIGHT,
+        initial_view_state=pdk.ViewState(latitude=float(shown["lat"].mean()), longitude=float(shown["lon"].mean()), zoom=11.2 if region else 10.4),
+        layers=[
+            pdk.Layer("ScatterplotLayer", data=points, get_position=["lon", "lat"], get_radius=18,
+                      radius_units="'pixels'", get_fill_color=[184, 58, 27, 235], stroked=True,
+                      get_line_color=[251, 249, 244], line_width_min_pixels=2, pickable=True),
+            pdk.Layer("TextLayer", data=points, get_position=["lon", "lat"], get_text="label", get_size=14,
+                      get_color=[255, 255, 255], font_family="'system-ui, sans-serif'", font_weight=600,
+                      get_text_anchor="'middle'", get_alignment_baseline="'center'"),
+        ],
+        tooltip={"text": "#{rank} · {name}\n{incidents} reported crashes\n{pedestrian_or_cyclist} pedestrian/cyclist reports\n{selection_reason}",
+                 "style": {"backgroundColor": "#1c1a17", "color": "#f4f0e8", "fontSize": "14px", "maxWidth": "340px"}},
+    )
+    map_col, list_col = st.columns([1.05, 1], gap="large")
+    with map_col:
+        st.pydeck_chart(deck, height=520)
+        st.caption("Numbers match the ranked list. Markers use the median reported coordinates of each grouped location.")
+    with list_col:
+        st.markdown(ui.shortlist(rows, result), unsafe_allow_html=True)
 
-# 05: briefing
-st.markdown(ui.section(5, "Morning safety briefing"), unsafe_allow_html=True)
-script = briefing.build_script(result)
-key = briefing.api_key()
-if key:
-    if st.button("Play the morning safety briefing", type="secondary"):
-        try:
-            st.audio(briefing.synthesize(script, key), format="audio/mpeg")
-        except Exception as exc:
-            st.caption(f"Audio failed ({type(exc).__name__}). The script is below.")
-    note = "Read by an ElevenLabs voice. Every name and number comes from the ranking above."
-else:
-    note = "Script for the spoken briefing. Every name and number comes from the ranking above."
-st.markdown(ui.briefing(script, note), unsafe_allow_html=True)
-
-st.markdown(ui.footer(briefing.FOOTER, result["dataset"]["drop_reason"]), unsafe_allow_html=True)
+st.markdown(ui.section(2, "Why these locations are priorities", "Reasons for the leading recommendations, based on reported incidents."), unsafe_allow_html=True)
+st.markdown(ui.movers(result, lambda k: briefing.display_name(names, k)), unsafe_allow_html=True)
+st.markdown(ui.section(3, "How your priorities affect the recommendations"), unsafe_allow_html=True)
+st.markdown(ui.ranking_changes(result, lambda k: briefing.display_name(names, k)), unsafe_allow_html=True)
+with st.expander("Advanced controls", expanded=False):
+    st.caption("These sliders change ranking priorities; they do not exclude other crash types. Indicators come from incident descriptions, not confirmed injury severity.")
+    st.slider("Give more priority to pedestrian/cyclist and other crash indicators", 0.0, 1.0, step=0.05, key="w_severity", on_change=change_control, args=("w_severity",), disabled=not interactive,
+              help="Higher values give extra importance to pedestrian/cyclist reports, multi-vehicle crashes, and crashes blocking multiple lanes.")
+    st.caption("Higher values give extra importance to pedestrian/cyclist reports, multi-vehicle crashes, and crashes blocking multiple lanes.")
+    st.slider("Give more priority to locations with increasing crashes", 0.0, 1.0, step=0.05, key="w_trend", on_change=change_control, args=("w_trend",), disabled=not interactive,
+              help="Higher values prioritize the smoothed ratio of July–December to January–June 2025 crash reports.")
+    st.caption("Prioritizes higher July–December activity relative to January–June 2025, with smoothing for small counts.")
+    st.slider("Give more priority to recent crashes", 1.0, 5.0, step=0.5, key="recent_weight", on_change=change_control, args=("recent_weight",), disabled=not interactive,
+              help="Higher values multiply July–December 2025 reports in both crash counts and incident-indicator points for the full-year ranking; January–June reports keep their usual importance.")
+    st.caption("Multiplies July–December 2025 counts and indicator points. January–June keeps its usual importance.")
+    st.caption(f"Current weights: incident indicators {ss.w_severity:.2f}; increasing activity {ss.w_trend:.2f}; recency {ss.recent_weight:g}×.")
+    st.button("Test ranking options automatically", on_click=request_tuning, type="primary", disabled=not interactive)
+    st.caption("Selects weights using historical reports for your displayed capacity, so a top 5 is tuned as a top 5. Retains your area, road scope and recency. This tuning does not demonstrate crash reduction.")
+with st.expander("About the data and attribution", expanded=False):
+    d = result["dataset"]
+    st.markdown(f"{d['rows_loaded']:,} rows loaded, {d['rows_dropped']:,} dropped, {d['rows_used']:,} used. These counts cover the full dataset, before your area and road filters.")
+    st.write(d["source"])
+    st.write("Rows set aside: " + d["drop_reason"] + ". Records missing location, coordinates, date, or description are also excluded.")
+    st.write("Location names are normalized and grouped; a group can represent a corridor or approximate cluster, rather than a verified intersection. Areas use the most frequently reported quadrant in each group.")
+    st.markdown("Source: [City of Calgary Traffic Incidents](https://data.calgary.ca/Transportation-Transit/Traffic-Incidents/35ra-9556). Contains information licensed under the Open Government Licence – City of Calgary.")
+    st.markdown(ui.PHOTO_CREDITS)
+st.markdown(ui.footer(briefing.FOOTER, ""), unsafe_allow_html=True)
 ss.last_result = result

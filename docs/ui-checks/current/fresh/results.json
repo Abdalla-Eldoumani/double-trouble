@@ -1,0 +1,408 @@
+{
+  "visual_checks": "passed",
+  "desktop": [
+    1440,
+    1050
+  ],
+  "mobile": [
+    390,
+    844
+  ],
+  "server": "http://localhost:8504",
+  "equipment": {
+    "width": 240,
+    "height": 240,
+    "opacity": "1",
+    "loaded": true,
+    "separateFromText": true,
+    "belowToggle": true
+  },
+  "road": {
+    "position": "absolute",
+    "opacity": "0.12",
+    "repeat": "no-repeat, no-repeat",
+    "mask": "linear-gradient(to right, rgb(0, 0, 0), rgba(0, 0, 0, 0) 95%), linear-gradient(rgba(0, 0, 0, 0), rgb(0, 0, 0) 18%, rgb(0, 0, 0) 65%, rgba(0, 0, 0, 0))",
+    "composite": "intersect, intersect",
+    "local": true,
+    "pointerEvents": "none"
+  },
+  "summary_readability": {
+    "light": {
+      "height": 291.140625,
+      "position": "static",
+      "overflow": "visible",
+      "headingUncovered": true,
+      "paragraphUncovered": true,
+      "reasonUncovered": true,
+      "colors": {
+        "background": "rgb(255, 255, 255)",
+        "heading": "rgb(32, 40, 48)",
+        "body": "rgb(32, 40, 48)"
+      },
+      "text": "Recommendation summary\n\n20 locations recommended in All Calgary \u00b7 Deerfoot and Stoney excluded by location name.\n\nApplied priorities: Crash totals.\n\nEastbound Glenmore Trail after Crowchild Trail SW \u2014 88 reported crashes; selected by total crash reports.\nEastbound Glenmore Trail approaching 14 Street SW \u2014 63 reported crashes; selected by total crash reports.\nEastbound Glenmore Trail approaching Blackfoot Trail SE \u2014 47 reported crashes; selected by total crash reports.\nLocation counts cover January\u2013December 2025. The crash total above covers the full cleaned dataset, before area and road filters.",
+      "ancestors": [
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "block"
+        },
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "block"
+        },
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "block"
+        },
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "flex"
+        },
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "flex"
+        },
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "flex"
+        },
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "block"
+        },
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "flex"
+        },
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "block"
+        },
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "flex"
+        },
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "block"
+        },
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "block"
+        },
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "block"
+        },
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "block"
+        },
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "block"
+        }
+      ]
+    },
+    "dark": {
+      "height": 291.140625,
+      "position": "static",
+      "overflow": "visible",
+      "headingUncovered": true,
+      "paragraphUncovered": true,
+      "reasonUncovered": true,
+      "colors": {
+        "background": "rgb(32, 42, 52)",
+        "heading": "rgb(240, 244, 248)",
+        "body": "rgb(240, 244, 248)"
+      },
+      "text": "Recommendation summary\n\n20 locations recommended in All Calgary \u00b7 Deerfoot and Stoney excluded by location name.\n\nApplied priorities: Crash totals.\n\nEastbound Glenmore Trail after Crowchild Trail SW \u2014 88 reported crashes; selected by total crash reports.\nEastbound Glenmore Trail approaching 14 Street SW \u2014 63 reported crashes; selected by total crash reports.\nEastbound Glenmore Trail approaching Blackfoot Trail SE \u2014 47 reported crashes; selected by total crash reports.\nLocation counts cover January\u2013December 2025. The crash total above covers the full cleaned dataset, before area and road filters.",
+      "ancestors": [
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "block"
+        },
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "block"
+        },
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "block"
+        },
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "flex"
+        },
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "flex"
+        },
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "flex"
+        },
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "block"
+        },
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "flex"
+        },
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "block"
+        },
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "flex"
+        },
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "block"
+        },
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "block"
+        },
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "block"
+        },
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "block"
+        },
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "block"
+        }
+      ]
+    },
+    "light_phone": {
+      "height": 639.96875,
+      "position": "static",
+      "overflow": "visible",
+      "headingUncovered": true,
+      "paragraphUncovered": true,
+      "reasonUncovered": true,
+      "colors": {
+        "background": "rgb(255, 255, 255)",
+        "heading": "rgb(32, 40, 48)",
+        "body": "rgb(32, 40, 48)"
+      },
+      "text": "Recommendation summary\n\n20 locations recommended in All Calgary \u00b7 Deerfoot and Stoney excluded by location name.\n\nApplied priorities: Crash totals.\n\nEastbound Glenmore Trail after Crowchild Trail SW \u2014 88 reported crashes; selected by total crash reports.\nEastbound Glenmore Trail approaching 14 Street SW \u2014 63 reported crashes; selected by total crash reports.\nEastbound Glenmore Trail approaching Blackfoot Trail SE \u2014 47 reported crashes; selected by total crash reports.\nLocation counts cover January\u2013December 2025. The crash total above covers the full cleaned dataset, before area and road filters.",
+      "ancestors": [
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "block"
+        },
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "block"
+        },
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "block"
+        },
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "flex"
+        },
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "flex"
+        },
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "flex"
+        },
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "block"
+        },
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "flex"
+        },
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "block"
+        },
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "flex"
+        },
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "block"
+        },
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "block"
+        },
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "block"
+        },
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "block"
+        },
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "block"
+        }
+      ]
+    },
+    "dark_phone": {
+      "height": 639.96875,
+      "position": "static",
+      "overflow": "visible",
+      "headingUncovered": true,
+      "paragraphUncovered": true,
+      "reasonUncovered": true,
+      "colors": {
+        "background": "rgb(32, 42, 52)",
+        "heading": "rgb(240, 244, 248)",
+        "body": "rgb(240, 244, 248)"
+      },
+      "text": "Recommendation summary\n\n20 locations recommended in All Calgary \u00b7 Deerfoot and Stoney excluded by location name.\n\nApplied priorities: Crash totals.\n\nEastbound Glenmore Trail after Crowchild Trail SW \u2014 88 reported crashes; selected by total crash reports.\nEastbound Glenmore Trail approaching 14 Street SW \u2014 63 reported crashes; selected by total crash reports.\nEastbound Glenmore Trail approaching Blackfoot Trail SE \u2014 47 reported crashes; selected by total crash reports.\nLocation counts cover January\u2013December 2025. The crash total above covers the full cleaned dataset, before area and road filters.",
+      "ancestors": [
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "block"
+        },
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "block"
+        },
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "block"
+        },
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "flex"
+        },
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "flex"
+        },
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "flex"
+        },
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "block"
+        },
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "flex"
+        },
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "block"
+        },
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "flex"
+        },
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "block"
+        },
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "block"
+        },
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "block"
+        },
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "block"
+        },
+        {
+          "opacity": "1",
+          "visibility": "visible",
+          "display": "block"
+        }
+      ]
+    }
+  },
+  "csv_identical_across_themes": true,
+  "download_bytes": 6703,
+  "captions": {
+    "light": {
+      "color": "rgb(82, 96, 109)",
+      "opacity": "1"
+    },
+    "dark": {
+      "color": "rgb(193, 204, 214)",
+      "opacity": "1"
+    }
+  },
+  "page_errors": []
+}

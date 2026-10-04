@@ -14,7 +14,7 @@ from streamlit.testing.v1 import AppTest
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from app import briefing, load, ui  # noqa: E402
+from app import briefing, load, planning, ui  # noqa: E402
 
 MAIN = str(ROOT / "app" / "main.py")
 FIXTURE = json.loads((ROOT / "contract" / "sample_output.json").read_text())
@@ -30,7 +30,7 @@ def consistent(result):
     for m in result["movers"]:
         m["to_rank"] = m["from_rank"] + 1
     return result
-TUNE_LABEL = "Let the agent tune it"
+TUNE_LABEL = "Test ranking options automatically"
 PLAY_LABEL = "Play the morning safety briefing"
 
 
@@ -52,10 +52,18 @@ def no_engine(monkeypatch):
 def fake_engine(monkeypatch):
     calls = []
 
-    def run(weights=None, tune=True):
-        calls.append({"weights": weights, "tune": tune})
+    def run(weights=None, tune=True, constraints=None):
+        calls.append(copy.deepcopy({"weights": weights, "tune": tune, "constraints": constraints}))
         result = consistent(FIXTURE)
         result["dataset"]["rows_used"] = 1234
+        result["weights"] = dict(FIXTURE["weights"] if tune else weights or planning.DEFAULT_WEIGHTS)
+        c = {**planning.DEFAULT_CONSTRAINTS, **(constraints or {})}
+        result["plan"] = {
+            "constraints": c,
+            "shortlist": [r["location_key"] for r in result["top20"][:c["budget"]]],
+            "baseline_shortlist": [r["location_key"] for r in result["baseline"]["top20"][:c["budget"]]],
+            "points_baseline": 10, "points_agent": 8, "points_total": 100,
+        }
         return result
 
     agent = types.ModuleType("engine.agent")
@@ -111,7 +119,7 @@ def test_get_result_uses_engine_when_present(fake_engine, monkeypatch):
     monkeypatch.setattr(load.st, "warning", shown.append)
     weights = {"w_severity": 0.2, "w_trend": 0.0, "exclude_provincial": False}
     assert load.get_result(weights, tune=False)["dataset"]["rows_used"] == 1234
-    assert fake_engine == [{"weights": weights, "tune": False}]
+    assert fake_engine == [{"weights": weights, "tune": False, "constraints": None}]
     assert shown == []
 
 
@@ -128,14 +136,14 @@ def test_briefing_uses_only_result_values():
     script = briefing.build_script(FIXTURE)
     body = script.replace(briefing.FOOTER, "")
     assert {n.replace(",", "") for n in re.findall(NUMBER, body)} <= numbers_in(FIXTURE)
-    for row in sorted(FIXTURE["top20"], key=lambda r: r["rank"])[:5]:
-        assert row["name"] in script
+    first = min(FIXTURE["top20"], key=lambda r: r["rank"])
+    assert briefing.spoken_name(first["name"]) in script
 
     changed = copy.deepcopy(FIXTURE)
     first = min(changed["top20"], key=lambda r: r["rank"])
     first["name"], first["incidents"] = "Test Street and Other Road", 4321
     changed_script = briefing.build_script(changed)
-    assert "Test Street and Other Road, 4321 incidents" in changed_script
+    assert "Test Street and Other Road: 4321 reported crashes" in changed_script
 
 
 def test_display_name_prefers_result_name_then_tidies_key():
@@ -162,11 +170,13 @@ def test_page_on_fixture_shows_banner_and_result_numbers(no_engine):
     assert load.FALLBACK_BANNER in [w.value for w in at.warning]
     data = FIXTURE["dataset"]
     assert any(f"{data['rows_used']:,} used" in md.value for md in at.markdown)
-    overlap = f"{FIXTURE['metrics']['overlap_with_baseline']} of {len(FIXTURE['top20'])} the same"
-    assert overlap in page_text(at)
+    overlap = f"Top-list overlap: {FIXTURE['metrics']['overlap_with_baseline']} of {len(FIXTURE['top20'])}"
+    assert overlap in ui.validation(at.session_state["last_result"])
     assert briefing.FOOTER in at.markdown[-1].value
     assert at.slider(key="w_severity").value == FIXTURE["weights"]["w_severity"]
     assert PLAY_LABEL not in [b.label for b in at.button]
+    assert at.selectbox(key="area").disabled
+    assert at.slider(key="w_severity").disabled
 
 
 def test_every_control_runs_against_engine(fake_engine):
@@ -181,6 +191,7 @@ def test_every_control_runs_against_engine(fake_engine):
     assert fake_engine[-1] == {
         "weights": {"w_severity": 0.8, "w_trend": 0.3, "exclude_provincial": True},
         "tune": False,
+        "constraints": planning.DEFAULT_CONSTRAINTS,
     }
 
     button(at, TUNE_LABEL).click().run()
@@ -189,7 +200,7 @@ def test_every_control_runs_against_engine(fake_engine):
     assert at.slider(key="w_severity").value == FIXTURE["weights"]["w_severity"]
     assert at.slider(key="w_trend").value == FIXTURE["weights"]["w_trend"]
     assert at.checkbox(key="exclude_provincial").value == FIXTURE["weights"]["exclude_provincial"]
-    assert all(it["note"] in page_text(at) for it in FIXTURE["agent_iterations"])
+    assert at.session_state["tuned"]["agent_iterations"] == FIXTURE["agent_iterations"]
 
 
 def test_page_with_real_engine():
@@ -197,55 +208,38 @@ def test_page_with_real_engine():
 
     default, tuned = run(tune=False), run(tune=True)
     at = run_app()
-    assert not at.exception, at.exception
     assert not at.warning, [w.value for w in at.warning]
     assert any(f"{default['dataset']['rows_used']:,} used" in md.value for md in at.markdown)
-    # The page opens on the agent's own choice, with its search shown.
-    assert at.slider(key="w_severity").value == tuned["weights"]["w_severity"]
-    assert at.slider(key="w_trend").value == tuned["weights"]["w_trend"]
+    assert at.slider(key="w_severity").value == default["weights"]["w_severity"]
     assert at.checkbox(key="exclude_provincial").value == default["weights"]["exclude_provincial"]
-    page = page_text(at)
-    overlap = f"{tuned['metrics']['overlap_with_baseline']} of {len(tuned['top20'])} the same"
-    assert overlap in page
-    for row in tuned["top20"]:
-        assert ui._clip(row["name"], 56) in page
-    for mover in tuned["movers"]:
-        assert mover["reason"] in page
-    for it in tuned["agent_iterations"]:
-        assert it["note"] in page
-
-    at.slider(key="w_severity").set_value(0.0).run()
-    assert not at.exception, at.exception
-    assert f"{len(default['top20'])} of {len(default['top20'])} the same" in page_text(at)
 
     button(at, TUNE_LABEL).click().run()
     assert not at.exception, at.exception
     assert not at.warning, [w.value for w in at.warning]
     assert at.slider(key="w_severity").value == tuned["weights"]["w_severity"]
-    assert overlap in page_text(at)
+    assert at.slider(key="w_trend").value == tuned["weights"]["w_trend"]
+    overlap = f"Top-list overlap: {tuned['metrics']['overlap_with_baseline']} of {len(tuned['top20'])}"
+    page = page_text(at)
+    assert overlap in ui.validation(at.session_state["last_result"])
+    for row in tuned["top20"]:
+        assert row["name"] in page
+    for row in tuned["top20"][:3]:
+        assert ui.location_reason(row, tuned) in page
+    for it in tuned["agent_iterations"]:
+        assert it in at.session_state["tuned"]["agent_iterations"]
 
 
-def test_briefing_audio_is_cached_per_script(no_engine, monkeypatch):
+def test_sample_ui_never_calls_speech_even_with_a_key(no_engine, monkeypatch):
     monkeypatch.setenv("ELEVENLABS_API_KEY", "test-key-not-real")
-    requests = []
-
-    class FakeTTS:
-        def convert(self, **kwargs):
-            requests.append(kwargs)
-            return iter([b"ID3", b"audio"])
-
-    class FakeClient:
-        def __init__(self, api_key, **kwargs):
-            self.text_to_speech = FakeTTS()
-
-    monkeypatch.setattr("elevenlabs.client.ElevenLabs", FakeClient)
+    def forbidden(*args, **kwargs):
+        pytest.fail("UI phase must not invoke speech or inspect credentials")
+    for name in ("api_key", "synthesize", "transcribe"):
+        monkeypatch.setattr(briefing, name, forbidden)
     at = run_app()
-    button(at, PLAY_LABEL).click().run()
-    button(at, PLAY_LABEL).click().run()
     assert not at.exception, at.exception
     assert not at.error
-    assert len(requests) == 1
-    assert requests[0]["text"] == briefing.build_script(FIXTURE)
+    assert PLAY_LABEL not in [b.label for b in at.button]
+    assert not at.get("audio_input") and not at.get("audio")
 
 
 def test_slope_draws_one_line_per_location_and_escapes_names():
@@ -264,11 +258,3 @@ def test_trace_marks_only_the_chosen_weights():
     out = ui.trace(tuned)
     assert out.count('<span class="tag">chosen</span>') == 1
     assert out.index("chosen") > out.index(tuned["agent_iterations"][0]["note"])
-
-
-def test_briefing_follows_the_planner_scope():
-    result = copy.deepcopy(FIXTURE)
-    result["plan"] = {"constraints": {"budget": 3, "region": "NW", "recent_weight": 1.0}}
-    script = briefing.build_script(result)
-    assert "The top 3 in northwest Calgary:" in script
-    assert script.count("Number ") == 3

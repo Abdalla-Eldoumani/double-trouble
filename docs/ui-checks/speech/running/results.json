@@ -1,0 +1,12 @@
+{
+  "server": "http://localhost:8502",
+  "transcribe_enabled": false,
+  "read_summary_enabled": false,
+  "review_apply_and_theme_preservation": true,
+  "dark_transcript_readable": true,
+  "phone_no_horizontal_overflow": true,
+  "summary_count": 1,
+  "summary_audio_players": 0,
+  "microphone_capture_tested": false,
+  "live_api_calls": 0
+}
