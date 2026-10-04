@@ -3,14 +3,15 @@
 import pandas as pd
 
 # Severity points per incident. These are judgment calls, stated so they can be argued with.
-BASE_POINTS = 1  # every crash counts, so a location never scores below its own count
-PEDESTRIAN_OR_CYCLIST_POINTS = 3  # an unprotected road user was hit; EMS attended most of these rows
-MULTI_VEHICLE_POINTS = 1  # two or more vehicles means more people exposed per crash
-MULTIPLE_LANES_POINTS = 1  # blocking several lanes is a proxy for a larger crash
+BASE_POINTS = 1  # every incident counts, so a location never scores below its own count
+PEDESTRIAN_OR_CYCLIST_POINTS = 3  # the text names an unprotected road user; EMS was on site or sent in nearly all
+MULTI_VEHICLE_POINTS = 1  # two or more vehicles means more people exposed per incident
+MULTIPLE_LANES_POINTS = 1  # blocking several lanes is a proxy for a larger collision
 
 PEDESTRIAN_OR_CYCLIST = r"pedestrian|cyclist"
 MULTI_VEHICLE = r"multi-vehicle|two vehicle"
-MULTIPLE_LANES = r"blocking multiple lanes"
+# "blocking the two right lanes", "blocking the left lanes": any wording that names more than one lane.
+MULTIPLE_LANES = r"blocking (?:the )?(?:multiple|two|three|all|both)\b[^.]*lanes|blocking the (?:\w+ )?(?:right|left|middle|centre) lanes"
 
 # Name pattern only. Whether these are provincial is sourced in docs/FACTS.md, not here.
 PROVINCIAL = r"deerfoot|stoney"
@@ -23,7 +24,7 @@ def add_points(df: pd.DataFrame) -> pd.DataFrame:
     out = df.assign(
         pedestrian_or_cyclist=d.str.contains(PEDESTRIAN_OR_CYCLIST, regex=True).astype(int),
         multi_vehicle=d.str.contains(MULTI_VEHICLE, regex=True).astype(int),
-        multiple_lanes=d.str.contains(MULTIPLE_LANES, regex=False).astype(int),
+        multiple_lanes=d.str.contains(MULTIPLE_LANES, regex=True).astype(int),
     )
     out["severity_points"] = (
         BASE_POINTS
