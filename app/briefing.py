@@ -2,7 +2,7 @@ import os
 
 import streamlit as st
 
-FOOTER = "This ranks where harm was reported in 2025. It does not predict or prevent crashes."
+FOOTER = "A 2025 shortlist for review, built from camera-logged incidents. It is not a forecast or a confirmed collision record."
 VOICE_ID = "JBFqnCBsd6RMkjVDRZzb"
 MODEL_ID = "eleven_multilingual_v2"
 QUADRANTS = {"nw", "ne", "sw", "se"}
@@ -27,9 +27,9 @@ def build_script(result):
     data = result["dataset"]
     lines = [
         "Morning safety briefing.",
-        f"{data['rows_used']:,} reported crashes, " + (
-            "ranked by harm." if any(result["weights"][k] for k in ("w_severity", "w_trend"))
-            else "ranked by crash count."),
+        f"{data['rows_used']:,} camera-logged incidents, " + (
+            "ranked by harm score." if any(result["weights"][k] for k in ("w_severity", "w_trend"))
+            else "ranked by incident count."),
         "The top five:",
     ]
     for r in sorted(result["top20"], key=lambda r: r["rank"])[:5]:
