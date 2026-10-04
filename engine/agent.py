@@ -4,25 +4,26 @@
 """
 
 import argparse
+import functools
 import json
 from pathlib import Path
 
 import pandas as pd
 
-from engine.data import load
+from engine.data import CSV, load
 from engine.score import TOP_N, add_points, baseline, rank, signals
 
 YEAR = ("2025-01-01", "2026-01-01")
 # Rank on Jan to Aug, score on Sep to Dec.
 TRAIN, TEST = ("2025-01-01", "2025-09-01"), ("2025-09-01", "2026-01-01")
-# A second, independent split to check the chosen weights were not a fluke of the first.
+# A second split as a consistency check. Jul-Dec contains Sep-Dec, so it is not a held-out test.
 CHECK_TRAIN, CHECK_TEST = ("2025-01-01", "2025-07-01"), ("2025-07-01", "2026-01-01")
 
 GRID = [(s, t) for t in (0.0, 0.5, 1.0) for s in (0.0, 0.25, 0.5, 0.75, 1.0)]
 # Deerfoot and Stoney are maintained by the province, not the City (docs/FACTS.md).
 DEFAULT_WEIGHTS = {"w_severity": 0.0, "w_trend": 0.0, "exclude_provincial": True}
 
-# What a planner can ask for on top of the weights: recent crashes counted more, one quadrant, a smaller budget.
+# What a planner can ask for on top of the weights: recent incidents counted more, one quadrant, a smaller budget.
 DEFAULT_CONSTRAINTS = {"recent_weight": 1.0, "region": None, "budget": TOP_N}
 REGIONS = ("NE", "NW", "SE", "SW")
 MAX_RECENT_WEIGHT = 5.0
@@ -65,32 +66,47 @@ def check_constraints(constraints: dict | None) -> dict:
 def backtest(
     df: pd.DataFrame, train: tuple, test: tuple, w: dict,
     recent_weight: float = 1.0, keep: set | None = None, n: int = TOP_N,
-) -> tuple[float, int, int]:
-    """Share of test-window severity points that fall in the train-window top n."""
+) -> tuple[float, float, int]:
+    """Share of test-window severity points that fall in the train-window top n.
+
+    Locations tied on score at the cut share the remaining places equally, so the
+    alphabetical tie-break used for display never decides who wins a backtest.
+    """
     sig = signals(df, *train, recent_weight=recent_weight)
-    top = rank(sig, w["w_severity"], w["w_trend"], w["exclude_provincial"], keep).head(n)
+    ranked = rank(sig, w["w_severity"], w["w_trend"], w["exclude_provincial"], keep)
     later = signals(df, *test)
     if w["exclude_provincial"]:
         later = later[~later["provincial"]]
     if keep is not None:
         later = later[later.index.isin(keep)]
-    total = int(later["severity_points"].sum())
-    caught = int(later["severity_points"].reindex(top.index, fill_value=0).sum())
-    return caught / total, caught, total
+    points = later["severity_points"]
+    total = int(points.sum())
+    if len(ranked) <= n:
+        caught = float(points.reindex(ranked.index, fill_value=0).sum())
+    else:
+        cut = ranked["score"].iloc[n - 1]
+        above = ranked.index[ranked["score"] > cut]
+        tied = ranked.index[ranked["score"] == cut]
+        caught = float(points.reindex(above, fill_value=0).sum()
+                       + (n - len(above)) * points.reindex(tied, fill_value=0).mean())
+    caught = round(caught, 1)
+    return caught / total, int(caught) if caught.is_integer() else caught, total
 
 
 def _weights(s: float, t: float, exclude: bool) -> dict:
     return {"w_severity": s, "w_trend": t, "exclude_provincial": exclude}
 
 
-def search(df: pd.DataFrame, exclude: bool, recent_weight: float = 1.0, keep: set | None = None) -> tuple[dict, list]:
+def search(
+    df: pd.DataFrame, exclude: bool, recent_weight: float = 1.0, keep: set | None = None, n: int = TOP_N,
+) -> tuple[dict, list]:
     # Simplest candidates first, and a candidate replaces the best only if strictly better,
     # so a tie always keeps the simpler weights.
     plan = sorted(GRID, key=lambda st: (st[0] + st[1], st[1]))
     iterations, best, best_caught = [], None, -1
     for i, (s, t) in enumerate(plan):
         w = _weights(s, t, exclude)
-        share, caught, total = backtest(df, TRAIN, TEST, w, recent_weight, keep)
+        share, caught, total = backtest(df, TRAIN, TEST, w, recent_weight, keep, n)
         if best is None:
             note = f"baseline: count-only captures {caught} of {total} points"
         elif caught > best_caught:
@@ -117,39 +133,57 @@ def describe(row: pd.Series) -> str:
     return ", ".join(parts)
 
 
+def _share(k: int, n: int, what: str) -> str:
+    return f"none of its {n} incidents {what}" if k == 0 else f"{k} of its {n} incidents {what}"
+
+
 def mover_reason(row: pd.Series, avg: float, w: dict) -> str:
     n, sev = row["incidents"], row["severity_points"]
-    mix = f"{row['pedestrian_or_cyclist']} pedestrian or cyclist, {row['multi_vehicle']} multi-vehicle"
-    rate = f"{sev / n:.2f} severity points per incident vs {avg:.2f} across both top-20 lists"
+    ped, multi = row["pedestrian_or_cyclist"], row["multi_vehicle"]
+    rate = f"{sev / n:.2f} severity points per incident against {avg:.2f} across both top-20 lists"
     if row["rank"] < row["baseline_rank"]:
-        why = f"{rate}: of its {n} incidents, {mix}"
+        lead = _share(ped, n, "involved a pedestrian or cyclist") if ped else _share(multi, n, "were multi-vehicle")
+        why = f"{lead[0].upper()}{lead[1:]}, so it scores {rate}"
     else:
-        why = f"{n} incidents but only {rate}: {mix}"
+        peds = "none" if ped == 0 else f"only {ped}"
+        multis = "none were" if multi == 0 else f"{multi} {'was' if multi == 1 else 'were'}"
+        why = f"{n} incidents, but {peds} involved a pedestrian or cyclist and {multis} multi-vehicle: {rate}"
     if w["w_trend"] and row["late"] != row["early"]:
         change = "rose" if row["late"] > row["early"] else "fell"
         why += f"; incidents {change} from {row['early']} in Jan-Jun to {row['late']} in Jul-Dec"
     return why
 
 
-def run(weights: dict | None = None, tune: bool = True, constraints: dict | None = None) -> dict:
-    w = check_weights(weights)
-    c = check_constraints(constraints)
+@functools.lru_cache(maxsize=1)
+def _prepare(csv_mtime: float) -> tuple[pd.DataFrame, dict, pd.DataFrame]:
+    """Load and score the CSV once per file version; every run after that only re-ranks."""
     df, info = load()
     df = add_points(df)
-
     places = df.groupby("location_key").agg(
-        name=("name", lambda s: s.mode().iloc[0]),
+        name=("display_name", lambda s: s.mode().iloc[0]),
         lat=("latitude", "median"),
         lon=("longitude", "median"),
         quadrant=("quadrant", lambda s: s.mode().iloc[0]),
     )
+    # A merged location keeps the quadrant of its key, whichever report its name came from.
+    tag = places.index.str.extract(r" (ne|nw|se|sw|n|s|e|w)$", expand=False).str.upper().fillna("")
+    stem = places["name"].str.replace(r" (?:NE|NW|SE|SW|N|S|E|W)$", "", regex=True)
+    places["name"] = (stem + " " + tag).str.strip().to_numpy()
+    return df, info, places
+
+
+def run(weights: dict | None = None, tune: bool = True, constraints: dict | None = None) -> dict:
+    w = check_weights(weights)
+    c = check_constraints(constraints)
+    df, info, places = _prepare(CSV.stat().st_mtime)
     keep = set(places.index[places["quadrant"] == c["region"]]) if c["region"] else None
     recent = c["recent_weight"]
 
     if tune:
-        w, iterations = search(df, w["exclude_provincial"], recent, keep)
+        # Tune for the shortlist the planner can afford, not always a top 20.
+        w, iterations = search(df, w["exclude_provincial"], recent, keep, c["budget"])
     else:
-        share, caught, total = backtest(df, TRAIN, TEST, w, recent, keep)
+        share, caught, total = backtest(df, TRAIN, TEST, w, recent, keep, c["budget"])
         iterations = [{
             "iteration": 0, "weights": w, "backtest_metric": round(share, 4),
             "note": f"given weights, not tuned: {caught} of {total} points",
