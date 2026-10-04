@@ -226,3 +226,7 @@ header[data-testid="stHeader"], [data-testid="stToolbar"], [data-testid="stDecor
 .mover-why { flex: 0 0 auto; }
 .stApp [data-testid="stExpander"] { border-radius: var(--radius); }
 [data-testid="stMainBlockContainer"]::before { opacity: calc(var(--road-opacity) * .6); }
+
+/* Example requests read as a short list of links, not spaced-out buttons. */
+.st-key-planner [data-testid="stElementContainer"]:has([data-testid="stBaseButton-tertiary"]) { margin-bottom: -0.6rem; }
+.st-key-planner [data-testid="stBaseButton-tertiary"] { min-height: 0; padding: 0.15rem 0; }
