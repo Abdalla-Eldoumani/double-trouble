@@ -274,3 +274,14 @@ header[data-testid="stHeader"], [data-testid="stToolbar"], [data-testid="stDecor
   .figures { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .fig:nth-child(3) { border-left: 0; padding-left: 0; }
 }
+
+/* Phones come last so they override the tablet rules above. */
+@media (max-width: 640px) {
+  .mast { flex-direction: column; gap: 0.5rem; }
+  .figures { grid-template-columns: minmax(0, 1fr); }
+  .fig, .fig:nth-child(3) { border-left: 0; padding: 1.2rem 0; border-top: 1px solid var(--rule); }
+  .fig:first-child { border-top: 0; }
+  .fig-value { font-size: 2.8rem; white-space: nowrap; }
+  .sec { grid-template-columns: minmax(0, 1fr); }
+  .sec-note { grid-column: 1; }
+}
