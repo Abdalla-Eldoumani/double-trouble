@@ -266,7 +266,7 @@ def validation(result):
         current = plan["points_agent"] / total if total else 0
         out.append(comparison(f"Primary validation · up to {plan['constraints']['budget']} locations · January–August → September–December 2025", base, current, total))
         gap = plan["points_agent"] - plan["points_baseline"]
-        out.append(f'<p>Total crashes: {plan["points_baseline"]} proxy points; current priorities: {plan["points_agent"]} '
+        out.append(f'<p>Total crashes: {round(plan["points_baseline"], 1):g} proxy points; current priorities: {round(plan["points_agent"], 1):g} '
                    f'of {total} eligible later-period proxy points. Difference: {_signed(gap, 0)} proxy points.</p>')
         if plan["points_baseline"]:
             change = 100 * gap / plan["points_baseline"]
@@ -313,7 +313,8 @@ def hero(title, lede, data):
 
 def _signed(value, digits=2):
     sign = "+" if value >= 0 else "-"
-    return f"{sign}{abs(value):.{digits}f}" if digits else f"{sign}{abs(value)}"
+    # Shared credit for ties can leave a tenth of a point; never print float noise.
+    return f"{sign}{abs(value):.{digits}f}" if digits else f"{sign}{round(abs(value), 1):g}"
 
 
 def _pair(base_label, base, agent_label, agent, fmt):
