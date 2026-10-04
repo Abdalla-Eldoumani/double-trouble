@@ -44,12 +44,26 @@ def numbers(value):
     ("city roads only", {}, {"exclude_provincial": True}, False),
     ("let the agent tune it", {}, {}, True),
     ("what is the weather like", {}, {}, False),
+    ("don't use severity", {}, {"w_severity": 0.0}, False),
+    ("no severity weighting please", {}, {"w_severity": 0.0}, False),
+    ("don't exclude deerfoot", {}, {"exclude_provincial": False}, False),
+    ("weight recent incidents 10 times", {"recent_weight": 5.0}, {}, False),
+    ("recent x3", {"recent_weight": 3.0}, {}, False),
+    ("look at 16 Avenue and 19 Street NE", {"region": "NE"}, {}, False),
+    ("our budget is 6", {"budget": 6}, {}, False),
+    ("let the agent decide", {}, {}, True),
 ])
+
 def test_parse(text, constraints, weights, tune):
     p = parse(text)
     assert p["constraints"] == constraints
     assert p["weights"] == weights
     assert p["tune"] is tune
+
+
+def test_reset_phrasings():
+    for text in ("reset", "start again", "back to defaults"):
+        assert parse(text)["reset"] is True
 
 
 def test_parse_clamps_budget_and_names_both_quadrants():
@@ -94,7 +108,8 @@ def test_bad_constraints_are_rejected(bad):
 def test_explanation_uses_only_result_numbers(baseline_result, example_result):
     p = parse(EXAMPLE)
     text = explain(example_result, compare(baseline_result, example_result), p["heard"])
-    assert "Crowchild Trail and Shaganappi Trail NW" in text or display(example_result["plan"]["shortlist"][0]) in text
+    lead = next(r for r in example_result["top20"] if r["location_key"] == example_result["plan"]["shortlist"][0])
+    assert lead["name"] in text
     allowed = numbers(example_result) | numbers(baseline_result) | {"2025"}
     assert set(re.findall(r"\d+", text)) <= allowed
 
