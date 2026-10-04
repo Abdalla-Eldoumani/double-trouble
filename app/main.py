@@ -11,7 +11,7 @@ import pandas as pd
 import pydeck as pdk
 import streamlit as st
 
-from app import briefing, ui
+from app import briefing, export, ui
 from app.load import ResultShapeError, consistency_warnings, get_result
 
 st.set_page_config(page_title="Calgary safety shortlist", layout="wide")
@@ -302,6 +302,10 @@ with map_col:
     st.markdown(ui.legend(), unsafe_allow_html=True)
 with list_col:
     st.markdown(ui.shortlist(shown.to_dict("records")), unsafe_allow_html=True)
+    csv_data, csv_name = export.shortlist_csv(result)
+    # "ignore" keeps the download from rerunning the page and re-ranking.
+    st.download_button("Download this shortlist (CSV)", data=csv_data, file_name=csv_name, mime="text/csv",
+                       on_click="ignore", key="export_shortlist", type="tertiary")
 
 # 02: movers
 st.markdown(ui.section(2, "Why it moved", "The three biggest rank changes against a plain incident count, "
