@@ -118,6 +118,20 @@ def recording_id(data, model):
     return hashlib.sha256(model.encode() + b"\0" + data).hexdigest()
 
 
+# A 16-bit recording whose loudest sample never passes 64 (0.2% of full scale) is a muted microphone.
+QUIET_PEAK = 64
+QUIET_MESSAGE = ("The recording is almost silent. Check that the browser is using the right microphone "
+                 "and that it is not muted, then record again.")
+UNCLEAR_MESSAGE = ("That did not come through as an English request. Speak closer to the microphone "
+                   "and record again, or type the request.")
+
+
+def _peak(frames):
+    import numpy as np
+    samples = np.frombuffer(frames[: len(frames) - len(frames) % 2], dtype="<i2")
+    return int(np.abs(samples.astype("int32")).max()) if samples.size else 0
+
+
 def validate_recording(data):
     if not isinstance(data, bytes) or not data or len(data) > 10_000_000:
         raise SpeechError("The recording is empty or too large. Record a short request and try again.")
@@ -129,6 +143,8 @@ def validate_recording(data):
                 raise SpeechError("The recording is too short or empty. Record a spoken request and try again.")
             if seconds > MAX_RECORDING_SECONDS:
                 raise SpeechError("Keep recordings under 90 seconds, then try again.")
+            if audio.getsampwidth() == 2 and _peak(frames) < QUIET_PEAK:
+                raise SpeechError(QUIET_MESSAGE)
     except (wave.Error, EOFError, ValueError, ZeroDivisionError):
         raise SpeechError("The recording could not be read. Record it again using the microphone control.") from None
 
@@ -146,6 +162,9 @@ def transcribe(audio, key, model_id=None):
         text = getattr(response, "text", None)
         if not isinstance(text, str) or not text.strip():
             raise SpeechError("No speech was transcribed. Record a clear spoken request and try again.")
+        # Near-silent clips come back as a filler word in another script (for example "うん。").
+        if len(re.findall(r"[A-Za-z]", text)) < 3:
+            raise SpeechError(UNCLEAR_MESSAGE)
         return text.strip()
     except SpeechError:
         raise
